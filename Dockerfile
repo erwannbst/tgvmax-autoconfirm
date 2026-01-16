@@ -2,15 +2,12 @@ FROM node:20-bookworm
 
 WORKDIR /app
 
-RUN npm i
-# Install Playwright with system dependencies
-RUN npx -y playwright@1.57.0 install --with-deps
-
 # Copy package files
 COPY package*.json tsconfig.json ./
 
-# Install dependencies
-RUN npm ci
+RUN npm i
+# Install Playwright with system dependencies
+RUN npx -y playwright@1.57.0 install --with-deps
 
 # Copy source code
 COPY src/ ./src/
