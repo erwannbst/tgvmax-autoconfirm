@@ -1,0 +1,29 @@
+{
+  "name": "tgvmax-autoconfirm",
+  "version": "1.0.0",
+  "description": "Automatic TGV Max reservation confirmation",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "confirm": "node dist/index.js --confirm",
+    "check": "node dist/index.js --check"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "dotenv": "^16.4.5",
+    "winston": "^3.14.2",
+    "date-fns": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "typescript": "^5.5.4",
+    "ts-node": "^10.9.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

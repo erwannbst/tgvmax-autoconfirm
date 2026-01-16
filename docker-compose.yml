@@ -1,0 +1,18 @@
+services:
+  tgvmax-autoconfirm:
+    build: .
+    container_name: tgvmax-autoconfirm
+    environment:
+      - SNCF_EMAIL=${SNCF_EMAIL}
+      - SNCF_PASSWORD=${SNCF_PASSWORD}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - HEADLESS=${HEADLESS:-true}
+      - SCREENSHOT_ON_ERROR=${SCREENSHOT_ON_ERROR:-true}
+    volumes:
+      # Mount data directory for session persistence
+      - ./data:/app/data
+    # Restart policy for Dokploy scheduled runs
+    restart: "no"
