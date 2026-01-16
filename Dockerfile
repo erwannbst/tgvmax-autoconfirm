@@ -2,6 +2,7 @@ FROM node:20-bookworm
 
 WORKDIR /app
 
+RUN npm i
 # Install Playwright with system dependencies
 RUN npx -y playwright@1.57.0 install --with-deps
 
