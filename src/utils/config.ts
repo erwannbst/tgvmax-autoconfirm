@@ -15,6 +15,11 @@ export interface Config {
   telegram: {
     botToken: string;
     chatId: string;
+    allowedUserId: string; // User ID allowed to send commands
+  };
+  schedule: {
+    enabled: boolean;
+    time: string; // Time in HH:MM format (24h)
   };
   headless: boolean;
   screenshotOnError: boolean;
@@ -47,6 +52,11 @@ export function loadConfig(): Config {
     telegram: {
       botToken: getEnvOrThrow('TELEGRAM_BOT_TOKEN'),
       chatId: getEnvOrThrow('TELEGRAM_CHAT_ID'),
+      allowedUserId: getEnvOrThrow('TELEGRAM_CHAT_ID'),
+    },
+    schedule: {
+      enabled: getEnvOrDefault('SCHEDULE_ENABLED', 'true') === 'true',
+      time: getEnvOrDefault('SCHEDULE_TIME', '08:00'), // Default: 8 AM
     },
     headless: getEnvOrDefault('HEADLESS', 'true') === 'true',
     screenshotOnError: getEnvOrDefault('SCREENSHOT_ON_ERROR', 'true') === 'true',

@@ -19,8 +19,13 @@ export class TelegramNotifier {
   private bot: TelegramBot;
   private chatId: string;
 
-  constructor(config: Config['telegram']) {
-    this.bot = new TelegramBot(config.botToken);
+  /**
+   * Create a TelegramNotifier
+   * @param config Telegram configuration
+   * @param existingBot Optional existing bot instance to reuse (for sharing with command bot)
+   */
+  constructor(config: Pick<Config['telegram'], 'botToken' | 'chatId'>, existingBot?: TelegramBot) {
+    this.bot = existingBot ?? new TelegramBot(config.botToken);
     this.chatId = config.chatId;
   }
 
