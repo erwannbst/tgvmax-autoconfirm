@@ -18,8 +18,8 @@ const CONFIG = {
   // How long to keep codes (milliseconds)
   CODE_TTL: 10 * 60 * 1000, // 10 minutes
 
-  // Email search query
-  SEARCH_QUERY: 'from:noreply@sncf subject:(code vérification OR verification code) newer_than:1h is:unread',
+  // Email search query - Mon Identifiant SNCF security codes
+  SEARCH_QUERY: 'from:no-reply@monidentifiant.sncf subject:"Code de sécurité" newer_than:1h is:unread',
 };
 
 /**
@@ -67,29 +67,55 @@ function doGet(e) {
 
 /**
  * Search Gmail for SNCF verification code
+ * Always returns the code from the most recent email
  */
 function searchForCode() {
-  const threads = GmailApp.search(CONFIG.SEARCH_QUERY, 0, 5);
+  const threads = GmailApp.search(CONFIG.SEARCH_QUERY, 0, 10);
 
+  // Collect all matching messages from all threads
+  const allMessages = [];
   for (const thread of threads) {
     const messages = thread.getMessages();
-
     for (const message of messages) {
-      const body = message.getPlainBody() || message.getBody();
-      const code = extractCode(body);
+      // Only include unread messages
+      if (!message.isUnread()) continue;
+      allMessages.push(message);
+    }
+  }
 
-      if (code) {
-        // Mark as read to avoid re-processing
-        message.markRead();
+  // Sort by date, newest first
+  allMessages.sort((a, b) => b.getDate().getTime() - a.getDate().getTime());
 
-        // Cache the code
-        cacheCode(code, message.getDate().toISOString());
+  // Process messages from newest to oldest
+  for (const message of allMessages) {
+    // Try HTML body first (contains title attribute with full code)
+    // Then fall back to plain text
+    const htmlBody = message.getBody();
+    const plainBody = message.getPlainBody();
+    
+    let code = null;
+    
+    // Try HTML body first (more reliable for this email format)
+    if (htmlBody) {
+      code = extractCode(htmlBody);
+    }
+    
+    // Fall back to plain text if HTML didn't work
+    if (!code && plainBody) {
+      code = extractCode(plainBody);
+    }
 
-        return {
-          code: code,
-          timestamp: message.getDate().toISOString()
-        };
-      }
+    if (code) {
+      // Mark as read to avoid re-processing
+      message.markRead();
+
+      // Cache the code
+      cacheCode(code, message.getDate().toISOString());
+
+      return {
+        code: code,
+        timestamp: message.getDate().toISOString()
+      };
     }
   }
 
@@ -98,10 +124,31 @@ function searchForCode() {
 
 /**
  * Extract 6-digit code from email body
+ * Handles Mon Identifiant SNCF email format where code appears as:
+ * - title="Votre code de vérification est : 360858"
+ * - <span>360</span><span>858</span> (split in HTML)
  */
 function extractCode(body) {
+  // Pattern 1: title attribute format (most reliable for HTML emails)
+  // Matches: title="Votre code de vérification est : 360858"
+  const titlePattern = /title\s*=\s*["'].*?code\s*(?:de\s*)?v[ée]rification\s*(?:est\s*)?:?\s*(\d{6})["']/i;
+  const titleMatch = body.match(titlePattern);
+  if (titleMatch && titleMatch[1]) {
+    return titleMatch[1];
+  }
+
+  // Pattern 2: Code split in two spans with possible space/markup between
+  // Matches: >360</span><span...>858< or similar patterns
+  const splitCodePattern = />(\d{3})<\/span>\s*<span[^>]*>(\d{3})</i;
+  const splitMatch = body.match(splitCodePattern);
+  if (splitMatch && splitMatch[1] && splitMatch[2]) {
+    return splitMatch[1] + splitMatch[2];
+  }
+
+  // Pattern 3: Standard verification code patterns
   const patterns = [
     /code\s*(?:de\s*)?v[ée]rification\s*(?:est\s*)?:?\s*(\d{6})/i,
+    /code\s*(?:de\s*)?s[ée]curit[ée]\s*(?:est\s*)?:?\s*(\d{6})/i,
     /verification\s*code\s*:?\s*(\d{6})/i,
     /code\s*:?\s*(\d{6})/i,
   ];
@@ -111,6 +158,14 @@ function extractCode(body) {
     if (match && match[1]) {
       return match[1];
     }
+  }
+
+  // Pattern 4: Two 3-digit numbers separated by space (plain text rendering)
+  // Matches: 360 858
+  const spacedCodePattern = /\b(\d{3})\s+(\d{3})\b/;
+  const spacedMatch = body.match(spacedCodePattern);
+  if (spacedMatch && spacedMatch[1] && spacedMatch[2]) {
+    return spacedMatch[1] + spacedMatch[2];
   }
 
   // Fallback: find any 6-digit number
