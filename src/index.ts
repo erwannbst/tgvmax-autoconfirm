@@ -43,7 +43,6 @@ async function processAccount(
 
   try {
     logger.info(`[${account.name}] Starting processing...`);
-    await telegram.notifyStartup(chatId);
 
     const authSuccess = await authenticator.authenticate();
     if (!authSuccess) {

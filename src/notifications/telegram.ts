@@ -1,7 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import fs from 'fs';
 import { logger } from '../utils/logger';
-import { Config } from '../utils/config';
 
 export interface Reservation {
   id: string;
@@ -55,10 +54,6 @@ export class TelegramNotifier {
     for (const chatId of uniqueChatIds) {
       await this.sendMessage(chatId, message);
     }
-  }
-
-  async notifyStartup(chatId: string): Promise<void> {
-    await this.sendMessage(chatId, '🚄 <b>TGV Max Auto-Confirm</b> started\n\nChecking reservations...');
   }
 
   async notifyReservationsFound(chatId: string, accountName: string, reservations: Reservation[]): Promise<void> {
