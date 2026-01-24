@@ -77,7 +77,6 @@ export class ReservationConfirmer {
     // Check if confirmation is available (button not disabled)
     if (!reservation.confirmable) {
       logger.info(`Confirmation not yet available for: ${reservation.origin} → ${reservation.destination} (button disabled)`);
-      await this.telegram.notifyConfirmationNotYetAvailable(reservation);
       return { reservation, success: false, skipped: true };
     }
 
@@ -93,7 +92,6 @@ export class ReservationConfirmer {
       const isDisabled = await confirmButton.evaluate((el: HTMLButtonElement) => el.disabled);
       if (isDisabled) {
         logger.info(`Confirm button is disabled for: ${reservation.origin} → ${reservation.destination}`);
-        await this.telegram.notifyConfirmationNotYetAvailable(reservation);
         return { reservation, success: false, skipped: true };
       }
 

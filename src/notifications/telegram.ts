@@ -61,7 +61,7 @@ export class TelegramNotifier {
 
     const confirmableCount = reservations.filter(r => r.confirmable).length;
     const notYetCount = reservations.length - confirmableCount;
-    
+
     let header = `🔍 <b>Found ${reservations.length} reservation(s):</b>`;
     if (notYetCount > 0) {
       header += `\n(${confirmableCount} ready to confirm, ${notYetCount} not yet available)`;
@@ -99,22 +99,6 @@ export class TelegramNotifier {
       `🎫 Train ${reservation.trainNumber}\n\n` +
       `⚠️ Error: ${error}\n\n` +
       `<i>Please confirm manually on the SNCF app!</i>`;
-
-    await this.sendMessage(message);
-  }
-
-  async notifyConfirmationNotYetAvailable(reservation: Reservation): Promise<void> {
-    const date = reservation.departureDate.toLocaleDateString('fr-FR', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long'
-    });
-
-    const message = `⏳ <b>Confirmation not available yet</b>\n\n` +
-      `🚄 ${reservation.origin} → ${reservation.destination}\n` +
-      `📅 ${date} at ${reservation.departureTime}\n` +
-      `🎫 Train ${reservation.trainNumber}\n\n` +
-      `<i>The confirm button is disabled. This usually means it's too early to confirm (confirmation opens 48h before departure).</i>`;
 
     await this.sendMessage(message);
   }
