@@ -82,10 +82,27 @@ export class Authenticator {
 
     const page = this.page!;
 
+    // Load saved session for localStorage restoration
+    const savedSession = await this.sessionManager.loadSession();
+
     try {
       // Navigate to MAX JEUNE page
       logger.info(`Navigating to ${SNCF_MAX_URL}`);
       await page.goto(SNCF_MAX_URL, { waitUntil: 'networkidle' });
+
+      // Restore localStorage if we have saved session data
+      if (savedSession?.localStorage && Object.keys(savedSession.localStorage).length > 0) {
+        await page.evaluate((storage) => {
+          for (const [key, value] of Object.entries(storage)) {
+            localStorage.setItem(key, value);
+          }
+        }, savedSession.localStorage);
+        logger.info('Restored localStorage from saved session');
+
+        // Reload to apply localStorage
+        await page.reload({ waitUntil: 'networkidle' });
+      }
+
       await randomSleep(2000, 4000);
 
       // Handle cookie consent modal if present
