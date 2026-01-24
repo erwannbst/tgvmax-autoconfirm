@@ -53,16 +53,31 @@ export class WebhookReader {
       headers: {
         'Accept': 'application/json',
       },
+      redirect: 'follow',
     });
 
     if (!response.ok) {
       throw new Error(`Webhook returned status ${response.status}`);
     }
 
-    const data: WebhookResponse = await response.json();
+    const text = await response.text();
+
+    // Check if response is HTML (error page)
+    if (text.startsWith('<!') || text.startsWith('<html')) {
+      logger.error(`Webhook returned HTML instead of JSON. Check your WEBHOOK_URL.`);
+      logger.error(`URL being called: ${this.webhookUrl}`);
+      logger.error(`Response preview: ${text.substring(0, 200)}`);
+      throw new Error('Webhook returned HTML - check deployment URL');
+    }
+
+    const data: WebhookResponse = JSON.parse(text);
 
     if (data.success && data.code) {
       return data.code;
+    }
+
+    if (data.error) {
+      logger.debug(`Webhook response: ${data.error}`);
     }
 
     return null;
