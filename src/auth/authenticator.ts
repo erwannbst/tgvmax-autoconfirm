@@ -133,6 +133,13 @@ export class Authenticator {
       await this.clickLoginButton(page);
       await randomSleep(2000, 3000);
 
+      // Sometimes, the session is restored at this point, so we need to check if we are logged in
+      const isLoggedIn2 = await this.checkIfLoggedIn(page);
+      if (isLoggedIn2) {
+        logger.info('Already logged in');
+        return true;
+      }
+
       // Fill in credentials
       await this.fillCredentials(page);
 
@@ -214,7 +221,7 @@ export class Authenticator {
         'text="Déconnexion"',
         '[data-testid="user-menu"]',
         '.user-profile',
-        'text="Bonjour"'
+        'text="Mes réservations à venir"'
       ];
 
       for (const selector of loggedInIndicators) {
