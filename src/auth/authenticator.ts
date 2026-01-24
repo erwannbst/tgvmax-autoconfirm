@@ -240,6 +240,12 @@ export class Authenticator {
         }
       }
 
+      // or check if we are on the mes voyages page
+      const isMesVoyagesPage = await page.url().includes('/mes-voyages');
+      if (isMesVoyagesPage) {
+        return true;
+      }
+
       return false;
     } catch {
       return false;
