@@ -5,7 +5,7 @@ import { randomSleep } from '../utils/helpers';
 import fs from 'fs/promises';
 import path from 'path';
 
-const MAX_ESPACE_URL = 'https://www.maxjeune-tgvinoui.sncf/sncf-connect/espace-perso';
+const MAX_ESPACE_URL = 'https://www.maxjeune-tgvinoui.sncf/sncf-connect/mes-voyages';
 
 export class ReservationScraper {
   private page: Page;
@@ -270,7 +270,7 @@ export class ReservationScraper {
             for (let i = 0; i < 10 && parent; i++) {
               const text = parent.innerText.toLowerCase();
               if (text.includes(resInfo.origin.toLowerCase()) ||
-                  text.includes(resInfo.destination.toLowerCase())) {
+                text.includes(resInfo.destination.toLowerCase())) {
                 return true;
               }
               parent = parent.parentElement;
