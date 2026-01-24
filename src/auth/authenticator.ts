@@ -280,7 +280,7 @@ export class Authenticator {
 
     await page.waitForLoadState('networkidle');
 
-    await randomSleep(500, 1000);
+    await randomSleep(1500, 3000);
 
     // Find and fill password field
     const passwordSelectors = [

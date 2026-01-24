@@ -1,15 +1,19 @@
 import { Page } from 'playwright';
 import { logger } from '../utils/logger';
-import { Reservation } from '../notifications/telegram';
+import { Reservation, TelegramNotifier } from '../notifications/telegram';
 import { randomSleep } from '../utils/helpers';
+import fs from 'fs/promises';
+import path from 'path';
 
 const MAX_ESPACE_URL = 'https://www.maxjeune-tgvinoui.sncf/sncf-connect/espace-perso';
 
 export class ReservationScraper {
   private page: Page;
+  private telegram?: TelegramNotifier;
 
-  constructor(page: Page) {
+  constructor(page: Page, telegram?: TelegramNotifier) {
     this.page = page;
+    this.telegram = telegram;
   }
 
   async navigateToReservations(): Promise<void> {
@@ -172,6 +176,11 @@ export class ReservationScraper {
 
       logger.info(`Found ${confirmButtons.length} confirm buttons on page`);
 
+      // Send screenshot as proof when no buttons found
+      if (confirmButtons.length === 0 && this.telegram) {
+        await this.sendProofScreenshot('no_confirm_buttons');
+      }
+
       for (let i = 0; i < confirmButtons.length; i++) {
         // Get parent container that might contain trip info
         const button = confirmButtons[i];
@@ -287,5 +296,24 @@ export class ReservationScraper {
     }
 
     return null;
+  }
+
+  private async sendProofScreenshot(prefix: string): Promise<void> {
+    if (!this.telegram) return;
+
+    try {
+      const screenshotDir = path.join(process.cwd(), 'data', 'screenshots');
+      await fs.mkdir(screenshotDir, { recursive: true });
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const screenshotPath = path.join(screenshotDir, `${prefix}_${timestamp}.png`);
+
+      await this.page.screenshot({ path: screenshotPath, fullPage: true });
+      logger.info(`Proof screenshot saved: ${screenshotPath}`);
+
+      await this.telegram.sendScreenshot(screenshotPath, `📸 Page state: ${prefix}`);
+    } catch (error) {
+      logger.error(`Failed to send proof screenshot: ${error}`);
+    }
   }
 }

@@ -21,7 +21,7 @@ export class ReservationConfirmer {
 
   constructor(page: Page, telegram: TelegramNotifier, config: Config) {
     this.page = page;
-    this.scraper = new ReservationScraper(page);
+    this.scraper = new ReservationScraper(page, telegram);
     this.telegram = telegram;
     this.config = config;
   }

@@ -37,7 +37,7 @@ async function runCheckOnly(config: Config): Promise<void> {
     }
 
     const { ReservationScraper } = await import('./confirmation/scraper');
-    const scraper = new ReservationScraper(page);
+    const scraper = new ReservationScraper(page, telegram);
 
     const reservations = await scraper.fetchPendingReservations();
     await telegram.notifyReservationsFound(reservations);
