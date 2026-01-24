@@ -96,13 +96,16 @@ export class ReservationConfirmer {
       await confirmButton.click();
       logger.info('Clicked confirm button');
 
-      await randomSleep(1000, 2000);
-
-      // Handle potential confirmation dialog
-      await this.handleConfirmationDialog();
+      // Handle the confirmation modal
+      const dialogHandled = await this.handleConfirmationDialog();
+      logger.info(`Dialog handling result: ${dialogHandled ? 'dialog found and clicked' : 'no dialog found'}`);
 
       // Wait for confirmation to process
-      await this.page.waitForLoadState('networkidle');
+      try {
+        await this.page.waitForLoadState('networkidle', { timeout: 15000 });
+      } catch {
+        logger.warn('Network idle timeout, continuing anyway');
+      }
       await randomSleep(2000, 3000);
 
       // Verify confirmation success
@@ -130,83 +133,64 @@ export class ReservationConfirmer {
     }
   }
 
-  private async handleConfirmationDialog(): Promise<void> {
-    // Look for and handle any confirmation dialogs/modals
-    const dialogSelectors = [
-      'button:has-text("Oui")',
-      'button:has-text("Confirmer")',
-      'button:has-text("Valider")',
-      'button:has-text("OK")',
-      '[data-testid="confirm-dialog-yes"]',
-      '.modal button:has-text("Confirm")'
-    ];
+  private async handleConfirmationDialog(): Promise<boolean> {
+    // Wait for the modal to appear
+    const modalButtonSelector = 'button:has-text("Confirmer la réservation")';
+    
+    try {
+      // Wait up to 5 seconds for the modal button to appear
+      logger.info('Waiting for confirmation modal...');
+      const modalButton = await this.page.waitForSelector(modalButtonSelector, { 
+        state: 'visible', 
+        timeout: 5000 
+      });
 
-    for (const selector of dialogSelectors) {
-      try {
-        const button = await this.page.$(selector);
-        if (button && await button.isVisible()) {
-          await randomSleep(500, 1000);
-          await button.click();
-          logger.info(`Clicked dialog button: ${selector}`);
-          await this.page.waitForLoadState('networkidle');
-          break;
+      if (modalButton) {
+        await randomSleep(500, 1000);
+        await modalButton.click();
+        logger.info('Clicked "Confirmer la réservation" in modal');
+        
+        // Wait for the confirmation to process
+        try {
+          await this.page.waitForLoadState('networkidle', { timeout: 30000 });
+        } catch {
+          logger.warn('Network idle timeout after modal click');
         }
-      } catch {
-        continue;
+        return true;
       }
+    } catch (error) {
+      logger.warn(`Modal button not found: ${error}`);
     }
+
+    return false;
   }
 
   private async verifyConfirmation(reservation: Reservation): Promise<boolean> {
-    // Look for success indicators
-    const successIndicators = [
-      'text="Voyage confirmé"',
-      'text="Confirmation réussie"',
-      'text="Confirmé"',
-      'text="Votre voyage est confirmé"',
-      '.success-message',
-      '[data-testid="confirmation-success"]'
-    ];
+    logger.info('Verifying confirmation status...');
 
-    for (const selector of successIndicators) {
-      try {
-        const element = await this.page.$(selector);
-        if (element && await element.isVisible()) {
-          return true;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    // Also check if the confirm button is no longer visible (indicating it was processed)
+    // Check if the confirm button is still there and enabled
     const confirmButton = await this.scraper.getConfirmButtonForReservation(reservation);
-    if (!confirmButton || !(await confirmButton.isVisible())) {
-      // Button disappeared, likely successful
+    
+    if (!confirmButton) {
+      logger.info('Confirm button not found - success');
       return true;
     }
 
-    // Check page content for any error messages
-    const errorIndicators = [
-      'text="Erreur"',
-      'text="Échec"',
-      'text="impossible"',
-      '.error-message'
-    ];
-
-    for (const selector of errorIndicators) {
-      try {
-        const element = await this.page.$(selector);
-        if (element && await element.isVisible()) {
-          return false;
-        }
-      } catch {
-        continue;
-      }
+    const isVisible = await confirmButton.isVisible();
+    if (!isVisible) {
+      logger.info('Confirm button is no longer visible - success');
+      return true;
     }
 
-    // If no clear success or failure, assume success if no errors
-    return true;
+    const isDisabled = await confirmButton.evaluate((el: HTMLButtonElement) => el.disabled);
+    if (isDisabled) {
+      logger.info('Confirm button is now disabled - success');
+      return true;
+    }
+
+    // Button is still visible and enabled - confirmation failed
+    logger.warn('Confirm button is still enabled - confirmation failed');
+    return false;
   }
 
   private async saveErrorScreenshot(prefix: string): Promise<void> {
@@ -226,4 +210,5 @@ export class ReservationConfirmer {
       logger.error(`Failed to save screenshot: ${error}`);
     }
   }
+
 }
