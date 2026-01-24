@@ -88,7 +88,9 @@ export class Authenticator {
     try {
       // Navigate to MAX JEUNE page
       logger.info(`Navigating to ${SNCF_MAX_URL}`);
-      await page.goto(SNCF_MAX_URL, { waitUntil: 'networkidle' });
+      await page.goto(SNCF_MAX_URL, { waitUntil: 'load', timeout: 30000 });
+      // Wait for page to stabilize
+      await randomSleep(2000, 3000);
 
       // Restore localStorage if we have saved session data
       if (savedSession?.localStorage && Object.keys(savedSession.localStorage).length > 0) {
@@ -99,8 +101,16 @@ export class Authenticator {
         }, savedSession.localStorage);
         logger.info('Restored localStorage from saved session');
 
-        // Reload to apply localStorage
-        await page.reload({ waitUntil: 'networkidle' });
+        // Reload to apply localStorage - use 'load' instead of 'networkidle' to avoid timeout
+        // on sites with continuous network activity
+        try {
+          await page.reload({ waitUntil: 'load', timeout: 15000 });
+          // Wait a bit more for JS to process
+          await randomSleep(2000, 3000);
+        } catch (reloadError) {
+          logger.warn(`Page reload timed out, continuing anyway: ${reloadError}`);
+          // Continue anyway - the localStorage is already set
+        }
       }
 
       await randomSleep(2000, 4000);
