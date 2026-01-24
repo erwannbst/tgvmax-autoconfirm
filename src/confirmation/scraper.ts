@@ -171,38 +171,130 @@ export class ReservationScraper {
     const reservations: Reservation[] = [];
 
     try {
-      // Get all text content and look for confirmation buttons
-      const confirmButtons = await this.page.$$('button:has-text("Confirmer"), a:has-text("Confirmer"), [data-testid*="confirm"]');
+      // Find all "Confirmer" buttons (including disabled ones to see all upcoming trips)
+      const confirmButtons = await this.page.$$('button:has-text("Confirmer")');
 
-      logger.info(`Found ${confirmButtons.length} confirm buttons on page`);
+      logger.info(`Found ${confirmButtons.length} Confirmer buttons on page`);
 
-      // Send screenshot as proof when no buttons found
-      if (confirmButtons.length === 0 && this.telegram) {
-        await this.sendProofScreenshot('no_confirm_buttons');
+      // Send screenshot as proof
+      if (this.telegram) {
+        await this.sendProofScreenshot('reservations_page');
       }
 
       for (let i = 0; i < confirmButtons.length; i++) {
-        // Get parent container that might contain trip info
-        const button = confirmButtons[i];
-        const parentText = await button.evaluate((el: HTMLElement) => {
-          // Look up the DOM tree for a container with trip info
-          let parent = el.parentElement;
-          for (let j = 0; j < 10 && parent; j++) {
-            const text = parent.innerText;
-            if (text.length > 50 && text.length < 1000) {
-              return text;
-            }
-            parent = parent.parentElement;
-          }
-          return '';
-        });
+        try {
+          const button = confirmButtons[i];
 
-        if (parentText) {
-          const reservation = this.parseTextForReservation(parentText, i);
-          if (reservation) {
-            reservations.push(reservation);
+          // Check if button is disabled
+          const isDisabled = await button.evaluate((el: HTMLButtonElement) => el.disabled);
+
+          // Extract reservation data from parent container
+          const data = await button.evaluate((el: HTMLElement) => {
+            // Go up the DOM to find the reservation container (look for section or large div)
+            let container = el.parentElement;
+            for (let j = 0; j < 15 && container; j++) {
+              // Look for a container with enough content (stations, times, etc.)
+              if (container.querySelectorAll('time').length >= 2) {
+                break;
+              }
+              container = container.parentElement;
+            }
+
+            if (!container) return null;
+
+            // Extract times from <time> elements
+            const timeElements = container.querySelectorAll('time');
+            const times: string[] = [];
+            const datetimes: string[] = [];
+            timeElements.forEach(t => {
+              const text = t.textContent?.trim();
+              const dt = t.getAttribute('datetime');
+              // Time format is like "18:28" or has datetime attribute
+              if (text && /^\d{1,2}[h:]\d{2}$/.test(text)) {
+                times.push(text);
+              }
+              if (dt) {
+                datetimes.push(dt);
+              }
+            });
+
+            // Get all text content and look for station names (usually in ALL CAPS or with specific patterns)
+            const allText = container.innerText;
+
+            // Find station names - they appear after times, typically in uppercase
+            // Pattern: time followed by station name
+            const stationMatches = allText.match(/\d{1,2}[h:]\d{2}\s*\n?\s*([A-ZÀÂÄÉÈÊËÏÎÔÙÛÜÇ][A-ZÀÂÄÉÈÊËÏÎÔÙÛÜÇ\s\d]+)/g);
+            const stations: string[] = [];
+            if (stationMatches) {
+              stationMatches.forEach(match => {
+                const station = match.replace(/\d{1,2}[h:]\d{2}\s*\n?\s*/, '').trim();
+                if (station.length > 2) {
+                  stations.push(station);
+                }
+              });
+            }
+
+            // Extract train number (TGV INOUI N°8736 or similar)
+            const trainMatch = allText.match(/(?:TGV|INOUI|INTERCITÉS?)\s*(?:INOUI\s*)?N°\s*(\d+)/i);
+            const trainNumber = trainMatch ? trainMatch[1] : '';
+
+            // Extract date - look for French date patterns
+            const dateMatch = allText.match(/(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s+(\d{4})/i);
+
+            return {
+              stations,
+              times,
+              datetimes,
+              trainNumber,
+              dateMatch: dateMatch ? { day: dateMatch[1], month: dateMatch[2], year: dateMatch[3] } : null,
+              fullText: allText.substring(0, 500) // For debugging
+            };
+          });
+
+          if (!data) {
+            logger.warn(`Could not find container for button ${i}`);
+            continue;
           }
+
+          logger.info(`Button ${i} (disabled=${isDisabled}): stations=${data.stations.join(' → ')}, times=${data.times.join(', ')}, train=${data.trainNumber}`);
+
+          // Parse the date
+          let departureDate = new Date();
+          if (data.datetimes.length > 0) {
+            departureDate = new Date(data.datetimes[0]);
+          } else if (data.dateMatch) {
+            const monthMap: Record<string, number> = {
+              'janvier': 0, 'février': 1, 'mars': 2, 'avril': 3,
+              'mai': 4, 'juin': 5, 'juillet': 6, 'août': 7,
+              'septembre': 8, 'octobre': 9, 'novembre': 10, 'décembre': 11
+            };
+            const day = parseInt(data.dateMatch.day);
+            const month = monthMap[data.dateMatch.month.toLowerCase()];
+            const year = parseInt(data.dateMatch.year);
+            departureDate = new Date(year, month, day);
+          }
+
+          const origin = data.stations[0] || 'Unknown';
+          const destination = data.stations[1] || 'Unknown';
+          const departureTime = data.times[0] || 'Unknown';
+
+          reservations.push({
+            id: `reservation-${i}-${Date.now()}`,
+            origin,
+            destination,
+            departureDate,
+            departureTime,
+            trainNumber: data.trainNumber || 'Unknown',
+            status: 'pending'
+          });
+
+        } catch (error) {
+          logger.warn(`Failed to parse reservation for button ${i}: ${error}`);
         }
+      }
+
+      if (confirmButtons.length === 0 && this.telegram) {
+        await this.sendProofScreenshot('no_confirm_buttons');
       }
     } catch (error) {
       logger.error(`Error parsing page for reservations: ${error}`);
