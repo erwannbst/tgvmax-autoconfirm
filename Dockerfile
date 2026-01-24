@@ -43,4 +43,4 @@ ENV NODE_ENV=production
 ENV HEADLESS=true
 
 # Run the application
-# CMD ["node", "dist/index.js"]
+CMD ["node", "dist/index.js"]
