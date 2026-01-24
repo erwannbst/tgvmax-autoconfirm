@@ -355,8 +355,44 @@ export class Authenticator {
   private async submit2FACode(page: Page, code: string): Promise<void> {
     logger.info(`Entering 2FA code: ${code}`);
 
-    // Find the 2FA input field
-    const codeSelectors = [
+    // First, try to find 6 separate input fields (common pattern)
+    const separateFieldSelectors = [
+      'input[maxlength="1"]',
+      'input[data-index]',
+      '.otp-input input',
+      '.code-input input',
+      '.verification-code input'
+    ];
+
+    for (const selector of separateFieldSelectors) {
+      const fields = await page.$$(selector);
+      const visibleFields = [];
+
+      for (const field of fields) {
+        if (await field.isVisible()) {
+          visibleFields.push(field);
+        }
+      }
+
+      if (visibleFields.length >= 6) {
+        logger.info(`Found ${visibleFields.length} separate digit fields`);
+
+        // Fill each field with corresponding digit
+        for (let i = 0; i < Math.min(6, visibleFields.length); i++) {
+          await visibleFields[i].click();
+          await randomSleep(100, 200);
+          await visibleFields[i].fill(code[i]);
+          await randomSleep(100, 200);
+        }
+
+        logger.info('2FA code entered (separate fields)');
+        await randomSleep(500, 1000);
+        return this.submit2FAForm(page);
+      }
+    }
+
+    // Fallback: single input field
+    const singleFieldSelectors = [
       'input[maxlength="6"]',
       'input[autocomplete="one-time-code"]',
       'input[type="tel"]',
@@ -364,22 +400,24 @@ export class Authenticator {
       'input[name="code"]'
     ];
 
-    for (const selector of codeSelectors) {
+    for (const selector of singleFieldSelectors) {
       const codeField = await page.$(selector);
       if (codeField && await codeField.isVisible()) {
         await codeField.click();
         await randomSleep(200, 400);
 
-        // Type the code digit by digit for more human-like behavior
-        for (const digit of code) {
-          await codeField.type(digit, { delay: 100 + Math.random() * 100 });
-        }
+        // Type the full code
+        await codeField.fill(code);
 
-        logger.info('2FA code entered');
+        logger.info('2FA code entered (single field)');
         break;
       }
     }
 
+    await this.submit2FAForm(page);
+  }
+
+  private async submit2FAForm(page: Page): Promise<void> {
     await randomSleep(500, 1000);
 
     // Submit the 2FA form
