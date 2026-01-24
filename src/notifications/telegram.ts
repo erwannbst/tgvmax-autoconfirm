@@ -58,80 +58,44 @@ export class TelegramNotifier {
 
   async notifyReservationsFound(chatId: string, accountName: string, reservations: Reservation[]): Promise<void> {
     if (reservations.length === 0) {
-      await this.sendMessage(chatId, `No reservations found.`);
+      // No Telegram message if nothing found - just log
+      logger.info(`[${accountName}] No reservations found`);
       return;
     }
 
     const lines = reservations.map(r => {
-      const date = r.departureDate.toLocaleDateString('fr-FR', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short'
-      });
+      const date = r.departureDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
       const status = r.confirmable ? '🟢' : '⏳';
-      const statusText = r.confirmable ? '' : ' (not yet)';
-      return `${status} ${r.origin} → ${r.destination}${statusText}\n  📅 ${date} at ${r.departureTime}`;
+      return `${status} ${r.origin} → ${r.destination} (${date} ${r.departureTime})`;
     });
 
-    const confirmableCount = reservations.filter(r => r.confirmable).length;
-    const notYetCount = reservations.length - confirmableCount;
-
-    let header = `🔍 Found ${reservations.length} reservation(s)`;
-    if (notYetCount > 0 && confirmableCount > 0) {
-      header += ` (${confirmableCount} ready, ${notYetCount} not yet)`;
-    } else if (notYetCount > 0) {
-      header += ` (not yet available)`;
-    }
-
-    const message = `${header}\n\n${lines.join('\n\n')}`;
+    const message = `🔍 ${reservations.length} reservation(s):\n${lines.join('\n')}`;
     await this.sendMessage(chatId, message);
   }
 
   async notifyConfirmationSuccess(chatId: string, reservation: Reservation): Promise<void> {
-    const date = reservation.departureDate.toLocaleDateString('fr-FR', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short'
-    });
-
-    const message = `✅ <b>Confirmed!</b>\n` +
-      `🚄 ${reservation.origin} → ${reservation.destination}\n` +
-      `📅 ${date} at ${reservation.departureTime}`;
-
-    await this.sendMessage(chatId, message);
+    const date = reservation.departureDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+    await this.sendMessage(chatId, `✅ ${reservation.origin} → ${reservation.destination} (${date} ${reservation.departureTime})`);
   }
 
   async notifyConfirmationFailure(chatId: string, reservation: Reservation, error: string): Promise<void> {
-    const date = reservation.departureDate.toLocaleDateString('fr-FR', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short'
-    });
-
-    const message = `❌ <b>Failed!</b>\n` +
-      `🚄 ${reservation.origin} → ${reservation.destination}\n` +
-      `📅 ${date} at ${reservation.departureTime}\n` +
-      `⚠️ ${error}`;
-
-    await this.sendMessage(chatId, message);
+    const date = reservation.departureDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+    await this.sendMessage(chatId, `❌ ${reservation.origin} → ${reservation.destination} (${date}): ${error}`);
   }
 
   async notifyAuthRequired(chatId: string): Promise<void> {
-    await this.sendMessage(chatId,
-      `🔐 <b>Authentication required</b>\n` +
-      `Waiting for 2FA code...`
-    );
+    // Logged server-side, no Telegram notification needed
+    logger.info('Authentication required, waiting for 2FA...');
   }
 
   async notifyAuthSuccess(chatId: string): Promise<void> {
-    await this.sendMessage(chatId, `✅ Authenticated successfully`);
+    // Logged server-side, no Telegram notification needed
+    logger.info('Authenticated successfully');
   }
 
   async notifyAuthFailure(chatId: string, error: string): Promise<void> {
-    await this.sendMessage(chatId,
-      `❌ <b>Authentication failed!</b>\n` +
-      `Error: ${error}`
-    );
+    // Auth failure is important - notify via Telegram
+    await this.sendMessage(chatId, `❌ Auth failed: ${error}`);
   }
 
   async notifyError(chatId: string, error: string): Promise<void> {
@@ -155,17 +119,7 @@ export class TelegramNotifier {
   }
 
   async notifyAccountComplete(chatId: string, result: AccountResult): Promise<void> {
-    const parts = [];
-    if (result.confirmed > 0) parts.push(`✅ ${result.confirmed} confirmed`);
-    if (result.failed > 0) parts.push(`❌ ${result.failed} failed`);
-    if (result.skipped > 0) parts.push(`⏳ ${result.skipped} not yet available`);
-
-    if (parts.length === 0) {
-      return; // No summary needed if nothing happened
-    }
-
-    const emoji = result.failed === 0 ? '✅' : '⚠️';
-    const message = `${emoji} <b>Done!</b> ${parts.join(', ')}`;
-    await this.sendMessage(chatId, message);
+    // Individual success/failure messages are already sent - only log summary
+    logger.info(`[${result.accountName}] Complete: ${result.confirmed} confirmed, ${result.failed} failed, ${result.skipped} skipped`);
   }
 }
