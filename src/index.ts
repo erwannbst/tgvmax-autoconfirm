@@ -1,17 +1,18 @@
-import { loadConfig, Config } from './utils/config';
+import { loadConfig, Config, SncfAccount, getSessionPath } from './utils/config';
 import { logger } from './utils/logger';
 import { Authenticator } from './auth/authenticator';
 import { ReservationConfirmer } from './confirmation/confirmer';
 import { TelegramCommandBot } from './notifications/bot';
+import { TelegramNotifier, AccountResult } from './notifications/telegram';
 import fs from 'fs/promises';
 import path from 'path';
 
 let commandBot: TelegramCommandBot | null = null;
 
-async function ensureDirectories(): Promise<void> {
+async function ensureDirectories(config: Config): Promise<void> {
   const dirs = [
-    path.join(process.cwd(), 'data'),
-    path.join(process.cwd(), 'data', 'screenshots')
+    config.dataDir,
+    path.join(config.dataDir, 'screenshots')
   ];
 
   for (const dir of dirs) {
@@ -20,52 +21,26 @@ async function ensureDirectories(): Promise<void> {
 }
 
 /**
- * Run check-only mode (no confirmations)
+ * Process a single account - authenticate and confirm reservations
  */
-async function runCheckOnly(config: Config, bot: TelegramCommandBot): Promise<void> {
-  logger.info('Running check-only mode (no confirmations)');
+async function processAccount(
+  config: Config,
+  account: SncfAccount,
+  telegram: TelegramNotifier,
+  checkOnly: boolean = false
+): Promise<AccountResult> {
+  const sessionPath = getSessionPath(config, account.name);
+  const authenticator = new Authenticator(config, account, sessionPath, telegram);
 
-  const telegram = bot.getNotifier();
-  const authenticator = new Authenticator(config, telegram);
+  const result: AccountResult = {
+    accountName: account.name,
+    confirmed: 0,
+    failed: 0,
+    skipped: 0,
+  };
 
   try {
-    const authSuccess = await authenticator.authenticate();
-    if (!authSuccess) {
-      throw new Error('Authentication failed');
-    }
-
-    const page = authenticator.getPage();
-    if (!page) {
-      throw new Error('No page available');
-    }
-
-    const { ReservationScraper } = await import('./confirmation/scraper');
-    const scraper = new ReservationScraper(page, telegram);
-
-    const reservations = await scraper.fetchPendingReservations();
-    await telegram.notifyReservationsFound(reservations);
-
-    logger.info(`Found ${reservations.length} reservations requiring confirmation`);
-    reservations.forEach(r => {
-      logger.info(`  - ${r.origin} → ${r.destination} on ${r.departureDate.toLocaleDateString('fr-FR')} at ${r.departureTime}`);
-    });
-
-  } finally {
-    await authenticator.close();
-  }
-}
-
-/**
- * Run confirmation mode
- */
-async function runConfirmation(config: Config, bot: TelegramCommandBot): Promise<void> {
-  logger.info('Running confirmation mode');
-
-  const telegram = bot.getNotifier();
-  const authenticator = new Authenticator(config, telegram);
-
-  try {
-    await telegram.notifyStartup();
+    logger.info(`[${account.name}] Starting processing...`);
 
     const authSuccess = await authenticator.authenticate();
     if (!authSuccess) {
@@ -77,57 +52,64 @@ async function runConfirmation(config: Config, bot: TelegramCommandBot): Promise
       throw new Error('No page available');
     }
 
-    const confirmer = new ReservationConfirmer(page, telegram, config);
-    const results = await confirmer.run();
-
-    const successful = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success && !r.skipped).length;
-    const skipped = results.filter(r => r.skipped).length;
-
-    logger.info(`Confirmation complete: ${successful} succeeded, ${failed} failed, ${skipped} skipped`);
-
-  } finally {
-    await authenticator.close();
-  }
-}
-
-/**
- * Run in one-shot mode (legacy mode for cron)
- */
-async function runOneShotMode(config: Config, checkOnly: boolean): Promise<void> {
-  const { TelegramNotifier } = await import('./notifications/telegram');
-  const telegram = new TelegramNotifier(config.telegram);
-  const authenticator = new Authenticator(config, telegram);
-
-  try {
     if (checkOnly) {
-      logger.info('Running check-only mode');
+      // Check-only mode: just fetch and display reservations
       const { ReservationScraper } = await import('./confirmation/scraper');
-      
-      const authSuccess = await authenticator.authenticate();
-      if (!authSuccess) throw new Error('Authentication failed');
-
-      const page = authenticator.getPage();
-      if (!page) throw new Error('No page available');
-
       const scraper = new ReservationScraper(page, telegram);
       const reservations = await scraper.fetchPendingReservations();
-      await telegram.notifyReservationsFound(reservations);
+      await telegram.notifyReservationsFound(account.name, reservations);
     } else {
-      logger.info('Running confirmation mode');
-      await telegram.notifyStartup();
+      // Confirmation mode
+      const confirmer = new ReservationConfirmer(page, telegram, config, account.name);
+      const results = await confirmer.run();
 
-      const authSuccess = await authenticator.authenticate();
-      if (!authSuccess) throw new Error('Authentication failed');
-
-      const page = authenticator.getPage();
-      if (!page) throw new Error('No page available');
-
-      const confirmer = new ReservationConfirmer(page, telegram, config);
-      await confirmer.run();
+      // Aggregate results
+      result.confirmed = results.filter(r => r.success).length;
+      result.failed = results.filter(r => !r.success && !r.skipped).length;
+      result.skipped = results.filter(r => r.skipped).length;
     }
+
+    logger.info(`[${account.name}] Processing complete`);
+
+  } catch (error) {
+    logger.error(`[${account.name}] Error: ${error}`);
+    await telegram.notifyError(String(error), account.name);
+    result.failed = 1;
   } finally {
     await authenticator.close();
+  }
+
+  return result;
+}
+
+/**
+ * Run confirmation for all accounts
+ */
+async function runConfirmationAllAccounts(config: Config, telegram: TelegramNotifier): Promise<AccountResult[]> {
+  logger.info(`Running confirmation for ${config.accounts.length} account(s)...`);
+  await telegram.notifyStartup();
+
+  const results: AccountResult[] = [];
+
+  for (const account of config.accounts) {
+    const result = await processAccount(config, account, telegram, false);
+    results.push(result);
+  }
+
+  // Send combined summary
+  await telegram.notifyAllComplete(results);
+
+  return results;
+}
+
+/**
+ * Run check-only for all accounts
+ */
+async function runCheckAllAccounts(config: Config, telegram: TelegramNotifier): Promise<void> {
+  logger.info(`Checking reservations for ${config.accounts.length} account(s)...`);
+
+  for (const account of config.accounts) {
+    await processAccount(config, account, telegram, true);
   }
 }
 
@@ -138,27 +120,30 @@ async function runBotMode(config: Config): Promise<void> {
   logger.info('Starting TGV Max Auto-Confirm Bot...');
 
   commandBot = new TelegramCommandBot(config);
+  const telegram = commandBot.getNotifier();
 
   // Set up handlers
   commandBot.setHandlers(
     // Confirm handler
     async () => {
-      await runConfirmation(config, commandBot!);
+      await runConfirmationAllAccounts(config, telegram);
     },
     // Check handler
     async () => {
-      await runCheckOnly(config, commandBot!);
+      await runCheckAllAccounts(config, telegram);
     }
   );
 
   // Start the scheduler
   commandBot.startScheduler();
 
-  // Notify startup
-  await commandBot.getNotifier().sendMessage(
+  // Notify startup with account names
+  const accountNames = config.accounts.map(a => a.name).join(', ');
+  await telegram.sendMessage(
     `🤖 <b>Bot started!</b>\n\n` +
-    `Schedule: Daily at ${config.schedule.time}\n` +
-    `Send /help to see available commands.`
+    `👥 Accounts: ${accountNames}\n` +
+    `⏰ Schedule: Daily at ${config.schedule.time}\n\n` +
+    `Send /help for commands.`
   );
 
   logger.info('Bot is running. Press Ctrl+C to stop.');
@@ -176,9 +161,22 @@ async function runBotMode(config: Config): Promise<void> {
   process.on('SIGTERM', shutdown);
 }
 
+/**
+ * Run in one-shot mode (for cron or manual trigger)
+ */
+async function runOneShotMode(config: Config, checkOnly: boolean): Promise<void> {
+  const telegram = new TelegramNotifier(config.telegram);
+
+  if (checkOnly) {
+    await runCheckAllAccounts(config, telegram);
+  } else {
+    await runConfirmationAllAccounts(config, telegram);
+  }
+}
+
 function printUsage(): void {
   console.log(`
-TGV Max Auto-Confirm
+TGV Max Auto-Confirm (Multi-Account)
 
 Usage:
   npm start                 Run in bot mode (default, always-on with scheduler)
@@ -189,22 +187,20 @@ Usage:
 
 Bot Mode:
   The bot runs continuously, listening for Telegram commands and
-  running scheduled confirmations daily.
+  running scheduled confirmations daily for all configured accounts.
 
   Commands:
-    /confirm  - Manually trigger confirmation
+    /confirm  - Manually trigger confirmation for all accounts
     /check    - Check reservations without confirming
     /status   - Show bot status
     /help     - Show available commands
 
 Environment variables:
-  SNCF_EMAIL          Your SNCF account email
-  SNCF_PASSWORD       Your SNCF account password
+  SNCF_ACCOUNTS       JSON array of accounts: [{"name":"X","email":"...","password":"..."}]
   WEBHOOK_URL         Google Apps Script webhook URL
   WEBHOOK_SECRET      Webhook secret key
   TELEGRAM_BOT_TOKEN  Telegram bot token
-  TELEGRAM_CHAT_ID    Your Telegram chat ID
-  TELEGRAM_USER_ID    Your Telegram user ID (for access control)
+  TELEGRAM_CHAT_ID    Your Telegram chat ID = user ID
   SCHEDULE_ENABLED    Enable daily scheduler (default: true)
   SCHEDULE_TIME       Daily run time in HH:MM (default: 08:00)
   HEADLESS            Run browser headless (default: true)
@@ -221,21 +217,20 @@ async function main(): Promise<void> {
   }
 
   try {
-    await ensureDirectories();
     const config = loadConfig();
+    await ensureDirectories(config);
+
+    logger.info(`Loaded ${config.accounts.length} account(s): ${config.accounts.map(a => a.name).join(', ')}`);
 
     const onceMode = args.includes('--once');
     const checkOnly = args.includes('--check');
     const botMode = args.includes('--bot') || (!onceMode && !checkOnly);
 
     if (onceMode || checkOnly) {
-      // Legacy one-shot mode for cron
       await runOneShotMode(config, checkOnly);
       logger.info('Done');
     } else if (botMode) {
-      // Always-on bot mode
       await runBotMode(config);
-      // Bot keeps running, no exit
     }
 
   } catch (error) {

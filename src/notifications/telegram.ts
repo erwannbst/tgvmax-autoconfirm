@@ -15,6 +15,13 @@ export interface Reservation {
   confirmable: boolean;
 }
 
+export interface AccountResult {
+  accountName: string;
+  confirmed: number;
+  failed: number;
+  skipped: number;
+}
+
 export class TelegramNotifier {
   private bot: TelegramBot;
   private chatId: string;
@@ -42,9 +49,13 @@ export class TelegramNotifier {
     await this.sendMessage('🚄 <b>TGV Max Auto-Confirm</b> started\n\nChecking for reservations to confirm...');
   }
 
-  async notifyReservationsFound(reservations: Reservation[]): Promise<void> {
+  async notifyAccountStart(accountName: string): Promise<void> {
+    await this.sendMessage(`\n👤 <b>[${accountName}]</b>`);
+  }
+
+  async notifyReservationsFound(accountName: string, reservations: Reservation[]): Promise<void> {
     if (reservations.length === 0) {
-      await this.sendMessage('✅ No reservations requiring confirmation.');
+      await this.sendMessage(`👤 <b>[${accountName}]</b> No reservations found.`);
       return;
     }
 
@@ -55,75 +66,74 @@ export class TelegramNotifier {
         month: 'short'
       });
       const status = r.confirmable ? '🟢' : '⏳';
-      const statusText = r.confirmable ? '' : ' (not yet available)';
-      return `${status} ${r.origin} → ${r.destination}${statusText}\n  📅 ${date} at ${r.departureTime} (Train ${r.trainNumber})`;
+      const statusText = r.confirmable ? '' : ' (not yet)';
+      return `${status} ${r.origin} → ${r.destination}${statusText}\n  📅 ${date} at ${r.departureTime}`;
     });
 
     const confirmableCount = reservations.filter(r => r.confirmable).length;
     const notYetCount = reservations.length - confirmableCount;
 
-    let header = `🔍 <b>Found ${reservations.length} reservation(s):</b>`;
-    if (notYetCount > 0) {
-      header += `\n(${confirmableCount} ready to confirm, ${notYetCount} not yet available)`;
+    let header = `👤 <b>[${accountName}]</b> Found ${reservations.length} reservation(s)`;
+    if (notYetCount > 0 && confirmableCount > 0) {
+      header += ` (${confirmableCount} ready, ${notYetCount} not yet)`;
+    } else if (notYetCount > 0) {
+      header += ` (not yet available)`;
     }
 
     const message = `${header}\n\n${lines.join('\n\n')}`;
     await this.sendMessage(message);
   }
 
-  async notifyConfirmationSuccess(reservation: Reservation): Promise<void> {
+  async notifyConfirmationSuccess(accountName: string, reservation: Reservation): Promise<void> {
     const date = reservation.departureDate.toLocaleDateString('fr-FR', {
-      weekday: 'long',
+      weekday: 'short',
       day: 'numeric',
-      month: 'long'
+      month: 'short'
     });
 
-    const message = `✅ <b>Reservation confirmed!</b>\n\n` +
+    const message = `✅ <b>[${accountName}]</b> Confirmed!\n` +
       `🚄 ${reservation.origin} → ${reservation.destination}\n` +
-      `📅 ${date} at ${reservation.departureTime}\n` +
-      `🎫 Train ${reservation.trainNumber}`;
+      `📅 ${date} at ${reservation.departureTime}`;
 
     await this.sendMessage(message);
   }
 
-  async notifyConfirmationFailure(reservation: Reservation, error: string): Promise<void> {
+  async notifyConfirmationFailure(accountName: string, reservation: Reservation, error: string): Promise<void> {
     const date = reservation.departureDate.toLocaleDateString('fr-FR', {
-      weekday: 'long',
+      weekday: 'short',
       day: 'numeric',
-      month: 'long'
+      month: 'short'
     });
 
-    const message = `❌ <b>Confirmation failed!</b>\n\n` +
+    const message = `❌ <b>[${accountName}]</b> Failed!\n` +
       `🚄 ${reservation.origin} → ${reservation.destination}\n` +
       `📅 ${date} at ${reservation.departureTime}\n` +
-      `🎫 Train ${reservation.trainNumber}\n\n` +
-      `⚠️ Error: ${error}\n\n` +
-      `<i>Please confirm manually on the SNCF app!</i>`;
+      `⚠️ ${error}`;
 
     await this.sendMessage(message);
   }
 
-  async notifyAuthRequired(): Promise<void> {
+  async notifyAuthRequired(accountName: string): Promise<void> {
     await this.sendMessage(
-      '🔐 <b>Authentication required</b>\n\n' +
-      'The session has expired. Attempting to re-authenticate with 2FA...'
+      `🔐 <b>[${accountName}]</b> Authentication required\n` +
+      `Waiting for 2FA code...`
     );
   }
 
-  async notifyAuthSuccess(): Promise<void> {
-    await this.sendMessage('✅ Successfully authenticated to SNCF Connect.');
+  async notifyAuthSuccess(accountName: string): Promise<void> {
+    await this.sendMessage(`✅ <b>[${accountName}]</b> Authenticated successfully`);
   }
 
-  async notifyAuthFailure(error: string): Promise<void> {
+  async notifyAuthFailure(accountName: string, error: string): Promise<void> {
     await this.sendMessage(
-      `❌ <b>Authentication failed!</b>\n\n` +
-      `Error: ${error}\n\n` +
-      `<i>Please check your credentials and try again.</i>`
+      `❌ <b>[${accountName}]</b> Authentication failed!\n` +
+      `Error: ${error}`
     );
   }
 
-  async notifyError(error: string): Promise<void> {
-    await this.sendMessage(`🚨 <b>Error:</b> ${error}`);
+  async notifyError(error: string, accountName?: string): Promise<void> {
+    const prefix = accountName ? `<b>[${accountName}]</b> ` : '';
+    await this.sendMessage(`🚨 ${prefix}Error: ${error}`);
   }
 
   async sendScreenshot(screenshotPath: string, caption?: string): Promise<void> {
@@ -142,14 +152,26 @@ export class TelegramNotifier {
     }
   }
 
-  async notifyComplete(confirmed: number, failed: number, skipped: number = 0): Promise<void> {
-    const emoji = failed === 0 ? '✅' : '⚠️';
-    let message = `${emoji} <b>Run complete</b>\n\n` +
-      `✅ Confirmed: ${confirmed}\n` +
-      `❌ Failed: ${failed}`;
+  async notifyAllComplete(results: AccountResult[]): Promise<void> {
+    const totalConfirmed = results.reduce((sum, r) => sum + r.confirmed, 0);
+    const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);
+    const totalSkipped = results.reduce((sum, r) => sum + r.skipped, 0);
 
-    if (skipped > 0) {
-      message += `\n⏳ Not yet available: ${skipped}`;
+    const emoji = totalFailed === 0 ? '✅' : '⚠️';
+
+    const accountLines = results.map(r => {
+      const parts = [];
+      if (r.confirmed > 0) parts.push(`✅ ${r.confirmed}`);
+      if (r.failed > 0) parts.push(`❌ ${r.failed}`);
+      if (r.skipped > 0) parts.push(`⏳ ${r.skipped}`);
+      const summary = parts.length > 0 ? parts.join(' ') : 'No reservations';
+      return `• <b>${r.accountName}</b>: ${summary}`;
+    });
+
+    let message = `${emoji} <b>Run complete</b>\n\n${accountLines.join('\n')}`;
+
+    if (results.length > 1) {
+      message += `\n\n<b>Total:</b> ✅ ${totalConfirmed} | ❌ ${totalFailed} | ⏳ ${totalSkipped}`;
     }
 
     await this.sendMessage(message);

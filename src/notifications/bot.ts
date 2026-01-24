@@ -163,9 +163,11 @@ export class TelegramCommandBot {
         : 'Not scheduled';
 
       const scheduleStatus = this.config.schedule.enabled ? '✅ Enabled' : '❌ Disabled';
+      const accountNames = this.config.accounts.map(a => a.name).join(', ');
 
       const message = `📊 <b>Bot Status</b>\n\n` +
         `<b>Status:</b> ${status}\n` +
+        `<b>Accounts:</b> ${accountNames}\n` +
         `<b>Last run:</b> ${lastRun}\n` +
         `<b>Next scheduled:</b> ${nextRun}\n\n` +
         `<b>Schedule:</b> ${scheduleStatus}\n` +

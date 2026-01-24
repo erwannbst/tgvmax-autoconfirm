@@ -1,7 +1,7 @@
 import { Camoufox } from 'camoufox-js';
 import { Browser, BrowserContext, Page } from 'playwright';
 import { logger } from '../utils/logger';
-import { Config } from '../utils/config';
+import { Config, SncfAccount } from '../utils/config';
 import { SessionManager, SessionData } from './session';
 import { WebhookReader } from '../email/webhookReader';
 import { TelegramNotifier } from '../notifications/telegram';
@@ -11,6 +11,7 @@ const SNCF_MAX_URL = 'https://www.maxjeune-tgvinoui.sncf/sncf-connect';
 
 export class Authenticator {
   private config: Config;
+  private account: SncfAccount;
   private sessionManager: SessionManager;
   private webhookReader: WebhookReader;
   private telegram: TelegramNotifier;
@@ -18,9 +19,10 @@ export class Authenticator {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
 
-  constructor(config: Config, telegram: TelegramNotifier) {
+  constructor(config: Config, account: SncfAccount, sessionPath: string, telegram: TelegramNotifier) {
     this.config = config;
-    this.sessionManager = new SessionManager(config.sessionPath);
+    this.account = account;
+    this.sessionManager = new SessionManager(sessionPath);
     this.telegram = telegram;
     this.webhookReader = new WebhookReader(
       config.webhook.url,
@@ -28,8 +30,12 @@ export class Authenticator {
     );
   }
 
+  getAccountName(): string {
+    return this.account.name;
+  }
+
   async initialize(): Promise<Page> {
-    logger.info('Initializing browser with Camoufox (anti-detect Firefox)...');
+    logger.info(`[${this.account.name}] Initializing browser with Camoufox...`);
 
     // Try to restore session
     const savedSession = await this.sessionManager.loadSession();
@@ -122,12 +128,12 @@ export class Authenticator {
       const isLoggedIn = await this.checkIfLoggedIn(page);
 
       if (isLoggedIn) {
-        logger.info('Already logged in with existing session');
+        logger.info(`[${this.account.name}] Already logged in with existing session`);
         return true;
       }
 
-      logger.info('Not logged in, proceeding with authentication...');
-      await this.telegram.notifyAuthRequired();
+      logger.info(`[${this.account.name}] Not logged in, proceeding with authentication...`);
+      await this.telegram.notifyAuthRequired(this.account.name);
 
       // Click on login button
       await this.clickLoginButton(page);
@@ -159,17 +165,17 @@ export class Authenticator {
       const loginSuccess = await this.checkIfLoggedIn(page);
 
       if (loginSuccess) {
-        logger.info('Authentication successful');
+        logger.info(`[${this.account.name}] Authentication successful`);
         await this.saveCurrentSession();
-        await this.telegram.notifyAuthSuccess();
+        await this.telegram.notifyAuthSuccess(this.account.name);
         return true;
       }
 
       throw new Error('Login verification failed');
 
     } catch (error) {
-      logger.error(`Authentication failed: ${error}`);
-      await this.telegram.notifyAuthFailure(String(error));
+      logger.error(`[${this.account.name}] Authentication failed: ${error}`);
+      await this.telegram.notifyAuthFailure(this.account.name, String(error));
 
       if (this.config.screenshotOnError) {
         await this.saveErrorScreenshot('auth_error');
@@ -288,8 +294,8 @@ export class Authenticator {
       if (emailField && await emailField.isVisible()) {
         await emailField.click();
         await randomSleep(200, 400);
-        await emailField.fill(this.config.sncf.email);
-        logger.info('Email entered');
+        await emailField.fill(this.account.email);
+        logger.info(`[${this.account.name}] Email entered`);
         break;
       }
     }
@@ -328,8 +334,8 @@ export class Authenticator {
       if (passwordField && await passwordField.isVisible()) {
         await passwordField.click();
         await randomSleep(200, 400);
-        await passwordField.fill(this.config.sncf.password);
-        logger.info('Password entered');
+        await passwordField.fill(this.account.password);
+        logger.info(`[${this.account.name}] Password entered`);
         break;
       }
     }
