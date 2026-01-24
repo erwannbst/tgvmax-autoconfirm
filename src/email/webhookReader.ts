@@ -62,6 +62,8 @@ export class WebhookReader {
 
     const text = await response.text();
 
+    console.log('Webhook response:', text);
+
     // Check if response is HTML (error page)
     if (text.startsWith('<!') || text.startsWith('<html')) {
       logger.error(`Webhook returned HTML instead of JSON. Check your WEBHOOK_URL.`);
