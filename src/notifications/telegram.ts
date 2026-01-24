@@ -1,4 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
+import fs from 'fs';
 import { logger } from '../utils/logger';
 import { Config } from '../utils/config';
 
@@ -106,6 +107,22 @@ export class TelegramNotifier {
 
   async notifyError(error: string): Promise<void> {
     await this.sendMessage(`🚨 <b>Error:</b> ${error}`);
+  }
+
+  async sendScreenshot(screenshotPath: string, caption?: string): Promise<void> {
+    try {
+      if (!fs.existsSync(screenshotPath)) {
+        logger.warn(`Screenshot file not found: ${screenshotPath}`);
+        return;
+      }
+
+      await this.bot.sendPhoto(this.chatId, screenshotPath, {
+        caption: caption || '📸 Error screenshot'
+      });
+      logger.info(`Screenshot sent via Telegram: ${screenshotPath}`);
+    } catch (error) {
+      logger.error(`Failed to send screenshot via Telegram: ${error}`);
+    }
   }
 
   async notifyComplete(confirmed: number, failed: number): Promise<void> {

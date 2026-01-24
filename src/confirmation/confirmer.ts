@@ -207,6 +207,9 @@ export class ReservationConfirmer {
 
       await this.page.screenshot({ path: screenshotPath, fullPage: true });
       logger.info(`Screenshot saved: ${screenshotPath}`);
+
+      // Send screenshot via Telegram
+      await this.telegram.sendScreenshot(screenshotPath, `🚨 Error: ${prefix}`);
     } catch (error) {
       logger.error(`Failed to save screenshot: ${error}`);
     }

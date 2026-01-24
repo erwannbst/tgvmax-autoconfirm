@@ -53,7 +53,7 @@ async function runCheckOnly(config: Config): Promise<void> {
 }
 
 async function runConfirmation(config: Config): Promise<void> {
-  logger.info('Running confirmation mode');
+  logger.info('Running confirmation mode 2');
 
   const telegram = new TelegramNotifier(config.telegram);
   const authenticator = new Authenticator(config, telegram);

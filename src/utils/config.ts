@@ -19,6 +19,7 @@ export interface Config {
   headless: boolean;
   screenshotOnError: boolean;
   sessionPath: string;
+  proxyUrl?: string;
 }
 
 function getEnvOrThrow(key: string): string {
@@ -50,5 +51,6 @@ export function loadConfig(): Config {
     headless: getEnvOrDefault('HEADLESS', 'true') === 'true',
     screenshotOnError: getEnvOrDefault('SCREENSHOT_ON_ERROR', 'true') === 'true',
     sessionPath: getEnvOrDefault('SESSION_PATH', path.join(process.cwd(), 'data', 'session.json')),
+    proxyUrl: process.env.PROXY_URL || undefined,
   };
 }

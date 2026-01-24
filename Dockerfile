@@ -1,13 +1,33 @@
-FROM node:20-bookworm
+FROM node:20
 
 WORKDIR /app
+
+# Install system dependencies for Firefox/Camoufox
+RUN apt-get update && apt-get install -y \
+    libgtk-3-0 \
+    libdbus-glib-1-2 \
+    libxt6 \
+    libx11-xcb1 \
+    libasound2 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libxkbcommon0 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json tsconfig.json ./
 
 RUN npm i
-# Install Playwright with system dependencies
-RUN npx -y playwright@1.57.0 install --with-deps
+
+# Fetch Camoufox browser binaries
+RUN npx camoufox-js fetch
 
 # Copy source code
 COPY src/ ./src/

@@ -1,4 +1,5 @@
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { Camoufox } from 'camoufox-js';
+import { Browser, BrowserContext, Page } from 'playwright';
 import { logger } from '../utils/logger';
 import { Config } from '../utils/config';
 import { SessionManager, SessionData } from './session';
@@ -7,7 +8,6 @@ import { TelegramNotifier } from '../notifications/telegram';
 import { randomSleep, sleep } from '../utils/helpers';
 
 const SNCF_MAX_URL = 'https://www.maxjeune-tgvinoui.sncf/sncf-connect';
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export class Authenticator {
   private config: Config;
@@ -29,23 +29,33 @@ export class Authenticator {
   }
 
   async initialize(): Promise<Page> {
-    logger.info('Initializing browser...');
-
-    this.browser = await chromium.launch({
-      headless: this.config.headless,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage',
-        '--no-sandbox',
-        '--disable-setuid-sandbox'
-      ]
-    });
+    logger.info('Initializing browser with Camoufox (anti-detect Firefox)...');
 
     // Try to restore session
     const savedSession = await this.sessionManager.loadSession();
 
+    // Build Camoufox options
+    const camoufoxOptions: Parameters<typeof Camoufox>[0] = {
+      headless: this.config.headless,
+      // Configure fingerprint to use a modern Firefox version
+      config: {
+        'navigator.userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
+        'navigator.appVersion': '5.0 (Windows)',
+        'navigator.platform': 'Win32'
+      }
+    };
+
+    // Add proxy if configured
+    if (this.config.proxyUrl) {
+      logger.info('Using proxy for browser connections');
+      camoufoxOptions.proxy = { server: this.config.proxyUrl };
+    }
+
+    // Launch Camoufox - it returns a browser instance with anti-detect built in
+    this.browser = await Camoufox(camoufoxOptions) as Browser;
+
+    // Create a new context with French locale
     this.context = await this.browser.newContext({
-      userAgent: savedSession?.userAgent || USER_AGENT,
       viewport: { width: 1920, height: 1080 },
       locale: 'fr-FR',
       timezoneId: 'Europe/Paris'
@@ -59,23 +69,8 @@ export class Authenticator {
 
     this.page = await this.context.newPage();
 
-    // Add stealth scripts
-    await this.page.addInitScript(() => {
-      // Override webdriver property
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined
-      });
-
-      // Override plugins
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5]
-      });
-
-      // Override languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['fr-FR', 'fr', 'en-US', 'en']
-      });
-    });
+    // No stealth scripts needed - Camoufox handles all anti-detection internally
+    // It patches Firefox at a low level, making detection nearly impossible
 
     return this.page;
   }
@@ -92,6 +87,9 @@ export class Authenticator {
       logger.info(`Navigating to ${SNCF_MAX_URL}`);
       await page.goto(SNCF_MAX_URL, { waitUntil: 'networkidle' });
       await randomSleep(2000, 4000);
+
+      // Handle cookie consent modal if present
+      await this.handleCookieConsent(page);
 
       // Check if already logged in
       const isLoggedIn = await this.checkIfLoggedIn(page);
@@ -147,6 +145,39 @@ export class Authenticator {
     }
   }
 
+  private async handleCookieConsent(page: Page): Promise<void> {
+    try {
+      // Look for cookie consent modal and accept it
+      const cookieSelectors = [
+        'button:has-text("Accepter & Fermer")',
+        'button:has-text("Accepter")',
+        'text="Accepter & Fermer"',
+        'text="Continuer sans accepter"',
+        '[data-testid="accept-cookies"]',
+        'button:has-text("Tout accepter")'
+      ];
+
+      for (const selector of cookieSelectors) {
+        try {
+          const button = await page.$(selector);
+          if (button && await button.isVisible()) {
+            await randomSleep(500, 1000);
+            await button.click();
+            logger.info(`Cookie consent handled: ${selector}`);
+            await randomSleep(1000, 2000);
+            return;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      logger.info('No cookie consent modal found or already accepted');
+    } catch (error) {
+      logger.warn(`Cookie consent handling failed: ${error}`);
+    }
+  }
+
   private async checkIfLoggedIn(page: Page): Promise<boolean> {
     try {
       // Look for elements that indicate we're logged in
@@ -178,7 +209,7 @@ export class Authenticator {
   private async clickLoginButton(page: Page): Promise<void> {
     const loginSelectors = [
       'text="Mon espace MAX"',
-      'text="Se connecter"',
+      'text="Me connecter"',
       'text="Connexion"',
       '[data-testid="login-button"]',
       'button:has-text("Connexion")',
@@ -228,6 +259,26 @@ export class Authenticator {
         break;
       }
     }
+
+    await randomSleep(600, 1200);
+    // Submit the form
+    const submitEmailSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Connexion")',
+      'button:has-text("Se connecter")',
+      'input[type="submit"]'
+    ];
+
+    for (const selector of submitEmailSelectors) {
+      const submitEmailButton = await page.$(selector);
+      if (submitEmailButton && await submitEmailButton.isVisible()) {
+        await submitEmailButton.click();
+        logger.info('Email submitted');
+        break;
+      }
+    }
+
+    await page.waitForLoadState('networkidle');
 
     await randomSleep(500, 1000);
 
@@ -368,18 +419,21 @@ export class Authenticator {
       return items;
     });
 
+    // Get the user agent from the page (Camoufox generates a realistic one)
+    const userAgent = await this.page.evaluate(() => navigator.userAgent);
+
     const sessionData: SessionData = {
       cookies,
       localStorage,
       lastLogin: new Date().toISOString(),
-      userAgent: USER_AGENT
+      userAgent
     };
 
     await this.sessionManager.saveSession(sessionData);
   }
 
-  private async saveErrorScreenshot(prefix: string): Promise<void> {
-    if (!this.page) return;
+  private async saveErrorScreenshot(prefix: string): Promise<string | null> {
+    if (!this.page) return null;
 
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -387,8 +441,14 @@ export class Authenticator {
 
       await this.page.screenshot({ path: screenshotPath, fullPage: true });
       logger.info(`Screenshot saved: ${screenshotPath}`);
+
+      // Send screenshot via Telegram
+      await this.telegram.sendScreenshot(screenshotPath, `🚨 Error: ${prefix}`);
+
+      return screenshotPath;
     } catch (error) {
       logger.error(`Failed to save screenshot: ${error}`);
+      return null;
     }
   }
 
