@@ -11,6 +11,7 @@ export interface ConfirmationResult {
   reservation: Reservation;
   success: boolean;
   error?: string;
+  skipped?: boolean; // True if skipped because confirmation not yet available
 }
 
 export class ReservationConfirmer {
@@ -54,8 +55,9 @@ export class ReservationConfirmer {
 
       // Send summary
       const confirmed = results.filter(r => r.success).length;
-      const failed = results.filter(r => !r.success).length;
-      await this.telegram.notifyComplete(confirmed, failed);
+      const skipped = results.filter(r => r.skipped).length;
+      const failed = results.filter(r => !r.success && !r.skipped).length;
+      await this.telegram.notifyComplete(confirmed, failed, skipped);
 
     } catch (error) {
       logger.error(`Error during confirmation run: ${error}`);
@@ -72,12 +74,27 @@ export class ReservationConfirmer {
   async confirmReservation(reservation: Reservation): Promise<ConfirmationResult> {
     logger.info(`Attempting to confirm: ${reservation.origin} → ${reservation.destination}`);
 
+    // Check if confirmation is available (button not disabled)
+    if (!reservation.confirmable) {
+      logger.info(`Confirmation not yet available for: ${reservation.origin} → ${reservation.destination} (button disabled)`);
+      await this.telegram.notifyConfirmationNotYetAvailable(reservation);
+      return { reservation, success: false, skipped: true };
+    }
+
     try {
       // Find the confirm button for this reservation
       const confirmButton = await this.scraper.getConfirmButtonForReservation(reservation);
 
       if (!confirmButton) {
         throw new Error('Could not find confirm button');
+      }
+
+      // Double-check if button is disabled (in case state changed)
+      const isDisabled = await confirmButton.evaluate((el: HTMLButtonElement) => el.disabled);
+      if (isDisabled) {
+        logger.info(`Confirm button is disabled for: ${reservation.origin} → ${reservation.destination}`);
+        await this.telegram.notifyConfirmationNotYetAvailable(reservation);
+        return { reservation, success: false, skipped: true };
       }
 
       // Click the confirm button

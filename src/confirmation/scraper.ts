@@ -159,7 +159,8 @@ export class ReservationScraper {
         departureDate,
         departureTime: timeMatch ? `${timeMatch[1]}h${timeMatch[2]}` : 'Unknown',
         trainNumber: trainMatch?.[1] || 'Unknown',
-        status: 'pending'
+        status: 'pending',
+        confirmable: true // Will be updated when checking the button state
       };
     } catch (error) {
       logger.error(`Error parsing reservation element: ${error}`);
@@ -285,8 +286,13 @@ export class ReservationScraper {
             departureDate,
             departureTime,
             trainNumber: data.trainNumber || 'Unknown',
-            status: 'pending'
+            status: 'pending',
+            confirmable: !isDisabled
           });
+
+          if (isDisabled) {
+            logger.info(`Reservation ${origin} → ${destination} has disabled confirm button (too early to confirm)`);
+          }
 
         } catch (error) {
           logger.warn(`Failed to parse reservation for button ${i}: ${error}`);
@@ -329,7 +335,8 @@ export class ReservationScraper {
       departureDate,
       departureTime: timeMatch ? `${timeMatch[1]}h${timeMatch[2]}` : 'Unknown',
       trainNumber: trainMatch?.[1] || 'Unknown',
-      status: 'pending'
+      status: 'pending',
+      confirmable: true // Will be updated when checking the button state
     };
   }
 
