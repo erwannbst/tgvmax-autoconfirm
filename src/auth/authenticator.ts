@@ -25,8 +25,8 @@ export class Authenticator {
     this.sessionManager = new SessionManager(sessionPath);
     this.telegram = telegram;
     this.webhookReader = new WebhookReader(
-      config.webhook.url,
-      config.webhook.secret
+      account.webhookUrl,
+      account.webhookSecret
     );
   }
 
@@ -133,7 +133,7 @@ export class Authenticator {
       }
 
       logger.info(`[${this.account.name}] Not logged in, proceeding with authentication...`);
-      await this.telegram.notifyAuthRequired(this.account.name);
+      await this.telegram.notifyAuthRequired(this.account.telegramChatId);
 
       // Click on login button
       await this.clickLoginButton(page);
@@ -167,7 +167,7 @@ export class Authenticator {
       if (loginSuccess) {
         logger.info(`[${this.account.name}] Authentication successful`);
         await this.saveCurrentSession();
-        await this.telegram.notifyAuthSuccess(this.account.name);
+        await this.telegram.notifyAuthSuccess(this.account.telegramChatId);
         return true;
       }
 
@@ -175,7 +175,7 @@ export class Authenticator {
 
     } catch (error) {
       logger.error(`[${this.account.name}] Authentication failed: ${error}`);
-      await this.telegram.notifyAuthFailure(this.account.name, String(error));
+      await this.telegram.notifyAuthFailure(this.account.telegramChatId, String(error));
 
       if (this.config.screenshotOnError) {
         await this.saveErrorScreenshot('auth_error');
@@ -521,7 +521,7 @@ export class Authenticator {
       logger.info(`Screenshot saved: ${screenshotPath}`);
 
       // Send screenshot via Telegram
-      await this.telegram.sendScreenshot(screenshotPath, `🚨 Error: ${prefix}`);
+      await this.telegram.sendScreenshot(this.account.telegramChatId, screenshotPath, `🚨 Error: ${prefix}`);
 
       return screenshotPath;
     } catch (error) {

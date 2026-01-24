@@ -20,13 +20,15 @@ export class ReservationConfirmer {
   private telegram: TelegramNotifier;
   private config: Config;
   private accountName: string;
+  private chatId: string;
 
-  constructor(page: Page, telegram: TelegramNotifier, config: Config, accountName: string) {
+  constructor(page: Page, telegram: TelegramNotifier, config: Config, accountName: string, chatId: string) {
     this.page = page;
-    this.scraper = new ReservationScraper(page, telegram);
+    this.scraper = new ReservationScraper(page);
     this.telegram = telegram;
     this.config = config;
     this.accountName = accountName;
+    this.chatId = chatId;
   }
 
   async run(): Promise<ConfirmationResult[]> {
@@ -36,7 +38,7 @@ export class ReservationConfirmer {
       // Fetch pending reservations
       const reservations = await this.scraper.fetchPendingReservations();
 
-      await this.telegram.notifyReservationsFound(this.accountName, reservations);
+      await this.telegram.notifyReservationsFound(this.chatId, this.accountName, reservations);
 
       if (reservations.length === 0) {
         logger.info(`[${this.accountName}] No reservations found that need confirmation`);
@@ -56,7 +58,7 @@ export class ReservationConfirmer {
 
     } catch (error) {
       logger.error(`[${this.accountName}] Error during confirmation run: ${error}`);
-      await this.telegram.notifyError(String(error), this.accountName);
+      await this.telegram.notifyError(this.chatId, String(error));
 
       if (this.config.screenshotOnError) {
         await this.saveErrorScreenshot('confirmation_error');
@@ -109,7 +111,7 @@ export class ReservationConfirmer {
       if (success) {
         logger.info(`[${this.accountName}] Successfully confirmed: ${reservation.origin} → ${reservation.destination}`);
         reservation.status = 'confirmed';
-        await this.telegram.notifyConfirmationSuccess(this.accountName, reservation);
+        await this.telegram.notifyConfirmationSuccess(this.chatId, reservation);
         return { reservation, success: true };
       } else {
         throw new Error('Confirmation verification failed');
@@ -118,7 +120,7 @@ export class ReservationConfirmer {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`[${this.accountName}] Failed to confirm reservation: ${errorMessage}`);
-      await this.telegram.notifyConfirmationFailure(this.accountName, reservation, errorMessage);
+      await this.telegram.notifyConfirmationFailure(this.chatId, reservation, errorMessage);
 
       if (this.config.screenshotOnError) {
         await this.saveErrorScreenshot(`confirm_fail_${reservation.id}`);
@@ -219,7 +221,7 @@ export class ReservationConfirmer {
       logger.info(`Screenshot saved: ${screenshotPath}`);
 
       // Send screenshot via Telegram
-      await this.telegram.sendScreenshot(screenshotPath, `🚨 Error: ${prefix}`);
+      await this.telegram.sendScreenshot(this.chatId, screenshotPath, `🚨 Error: ${prefix}`);
     } catch (error) {
       logger.error(`Failed to save screenshot: ${error}`);
     }

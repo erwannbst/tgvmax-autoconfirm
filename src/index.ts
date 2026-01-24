@@ -1,4 +1,4 @@
-import { loadConfig, Config, SncfAccount, getSessionPath } from './utils/config';
+import { loadConfig, Config, SncfAccount, getSessionPath, getAllChatIds } from './utils/config';
 import { logger } from './utils/logger';
 import { Authenticator } from './auth/authenticator';
 import { ReservationConfirmer } from './confirmation/confirmer';
@@ -31,9 +31,11 @@ async function processAccount(
 ): Promise<AccountResult> {
   const sessionPath = getSessionPath(config, account.name);
   const authenticator = new Authenticator(config, account, sessionPath, telegram);
+  const chatId = account.telegramChatId;
 
   const result: AccountResult = {
     accountName: account.name,
+    chatId,
     confirmed: 0,
     failed: 0,
     skipped: 0,
@@ -41,6 +43,7 @@ async function processAccount(
 
   try {
     logger.info(`[${account.name}] Starting processing...`);
+    await telegram.notifyStartup(chatId);
 
     const authSuccess = await authenticator.authenticate();
     if (!authSuccess) {
@@ -55,25 +58,28 @@ async function processAccount(
     if (checkOnly) {
       // Check-only mode: just fetch and display reservations
       const { ReservationScraper } = await import('./confirmation/scraper');
-      const scraper = new ReservationScraper(page, telegram);
+      const scraper = new ReservationScraper(page);
       const reservations = await scraper.fetchPendingReservations();
-      await telegram.notifyReservationsFound(account.name, reservations);
+      await telegram.notifyReservationsFound(chatId, account.name, reservations);
     } else {
       // Confirmation mode
-      const confirmer = new ReservationConfirmer(page, telegram, config, account.name);
+      const confirmer = new ReservationConfirmer(page, telegram, config, account.name, chatId);
       const results = await confirmer.run();
 
       // Aggregate results
       result.confirmed = results.filter(r => r.success).length;
       result.failed = results.filter(r => !r.success && !r.skipped).length;
       result.skipped = results.filter(r => r.skipped).length;
+
+      // Send account summary
+      await telegram.notifyAccountComplete(chatId, result);
     }
 
     logger.info(`[${account.name}] Processing complete`);
 
   } catch (error) {
     logger.error(`[${account.name}] Error: ${error}`);
-    await telegram.notifyError(String(error), account.name);
+    await telegram.notifyError(chatId, String(error));
     result.failed = 1;
   } finally {
     await authenticator.close();
@@ -87,7 +93,6 @@ async function processAccount(
  */
 async function runConfirmationAllAccounts(config: Config, telegram: TelegramNotifier): Promise<AccountResult[]> {
   logger.info(`Running confirmation for ${config.accounts.length} account(s)...`);
-  await telegram.notifyStartup();
 
   const results: AccountResult[] = [];
 
@@ -95,9 +100,6 @@ async function runConfirmationAllAccounts(config: Config, telegram: TelegramNoti
     const result = await processAccount(config, account, telegram, false);
     results.push(result);
   }
-
-  // Send combined summary
-  await telegram.notifyAllComplete(results);
 
   return results;
 }
@@ -137,9 +139,10 @@ async function runBotMode(config: Config): Promise<void> {
   // Start the scheduler
   commandBot.startScheduler();
 
-  // Notify startup with account names
+  // Notify startup to all users
+  const allChatIds = getAllChatIds(config);
   const accountNames = config.accounts.map(a => a.name).join(', ');
-  await telegram.sendMessage(
+  await telegram.broadcast(allChatIds,
     `🤖 <b>Bot started!</b>\n\n` +
     `👥 Accounts: ${accountNames}\n` +
     `⏰ Schedule: Daily at ${config.schedule.time}\n\n` +
@@ -165,7 +168,7 @@ async function runBotMode(config: Config): Promise<void> {
  * Run in one-shot mode (for cron or manual trigger)
  */
 async function runOneShotMode(config: Config, checkOnly: boolean): Promise<void> {
-  const telegram = new TelegramNotifier(config.telegram);
+  const telegram = new TelegramNotifier(config.telegram.botToken);
 
   if (checkOnly) {
     await runCheckAllAccounts(config, telegram);
@@ -196,11 +199,10 @@ Bot Mode:
     /help     - Show available commands
 
 Environment variables:
-  SNCF_ACCOUNTS       JSON array of accounts: [{"name":"X","email":"...","password":"..."}]
+  SNCF_ACCOUNTS       JSON array with name, email, password, telegramChatId, webhookUrl, webhookSecret
   WEBHOOK_URL         Google Apps Script webhook URL
   WEBHOOK_SECRET      Webhook secret key
   TELEGRAM_BOT_TOKEN  Telegram bot token
-  TELEGRAM_CHAT_ID    Your Telegram chat ID = user ID
   SCHEDULE_ENABLED    Enable daily scheduler (default: true)
   SCHEDULE_TIME       Daily run time in HH:MM (default: 08:00)
   HEADLESS            Run browser headless (default: true)

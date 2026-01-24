@@ -1,6 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { logger } from '../utils/logger';
-import { Config } from '../utils/config';
+import { Config, getAllowedUserIds, getAllChatIds } from '../utils/config';
 import { TelegramNotifier } from './telegram';
 
 export type ConfirmHandler = () => Promise<void>;
@@ -16,6 +16,7 @@ export class TelegramCommandBot {
   private bot: TelegramBot;
   private config: Config;
   private notifier: TelegramNotifier;
+  private allowedUserIds: string[];
   private state: BotState = {
     isRunning: false,
     lastRun: null,
@@ -29,7 +30,8 @@ export class TelegramCommandBot {
   constructor(config: Config) {
     this.config = config;
     this.bot = new TelegramBot(config.telegram.botToken, { polling: true });
-    this.notifier = new TelegramNotifier(config.telegram, this.bot);
+    this.notifier = new TelegramNotifier(config.telegram.botToken, this.bot);
+    this.allowedUserIds = getAllowedUserIds(config);
 
     this.setupCommands();
     this.setupErrorHandling();
@@ -55,7 +57,7 @@ export class TelegramCommandBot {
    */
   private isAuthorized(userId: number | undefined): boolean {
     if (!userId) return false;
-    return userId.toString() === this.config.telegram.allowedUserId;
+    return this.allowedUserIds.includes(userId.toString());
   }
 
   /**
@@ -207,7 +209,9 @@ export class TelegramCommandBot {
       this.state.lastRun = new Date();
     } catch (error) {
       logger.error(`Handler error: ${error}`);
-      await this.notifier.notifyError(`Run failed: ${error}`);
+      // Broadcast error to all users
+      const allChatIds = getAllChatIds(this.config);
+      await this.notifier.broadcast(allChatIds, `🚨 Run failed: ${error}`);
     } finally {
       this.state.isRunning = false;
     }
@@ -267,7 +271,9 @@ export class TelegramCommandBot {
       logger.info('Running scheduled confirmation...');
 
       if (this.confirmHandler) {
-        await this.notifier.sendMessage('⏰ <b>Scheduled run starting...</b>');
+        // Broadcast scheduled run start to all users
+        const allChatIds = getAllChatIds(this.config);
+        await this.notifier.broadcast(allChatIds, '⏰ <b>Scheduled run starting...</b>');
         await this.runWithLock(this.confirmHandler);
       }
 

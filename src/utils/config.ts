@@ -7,18 +7,15 @@ export interface SncfAccount {
   name: string;
   email: string;
   password: string;
+  telegramChatId: string;
+  webhookUrl: string;    // Google Apps Script webhook for 2FA codes
+  webhookSecret: string;
 }
 
 export interface Config {
   accounts: SncfAccount[];
-  webhook: {
-    url: string;
-    secret: string;
-  };
   telegram: {
     botToken: string;
-    chatId: string;
-    allowedUserId: string;
   };
   schedule: {
     enabled: boolean;
@@ -54,8 +51,8 @@ function parseAccounts(): SncfAccount[] {
 
     // Validate each account
     for (const account of accounts) {
-      if (!account.name || !account.email || !account.password) {
-        throw new Error(`Invalid account: each account must have name, email, and password`);
+      if (!account.name || !account.email || !account.password || !account.telegramChatId || !account.webhookUrl || !account.webhookSecret) {
+        throw new Error(`Invalid account: each account must have name, email, password, telegramChatId, webhookUrl, and webhookSecret`);
       }
     }
 
@@ -73,14 +70,8 @@ export function loadConfig(): Config {
 
   return {
     accounts,
-    webhook: {
-      url: getEnvOrThrow('WEBHOOK_URL'),
-      secret: getEnvOrThrow('WEBHOOK_SECRET'),
-    },
     telegram: {
       botToken: getEnvOrThrow('TELEGRAM_BOT_TOKEN'),
-      chatId: getEnvOrThrow('TELEGRAM_CHAT_ID'),
-      allowedUserId: getEnvOrThrow('TELEGRAM_CHAT_ID'),
     },
     schedule: {
       enabled: getEnvOrDefault('SCHEDULE_ENABLED', 'true') === 'true',
@@ -99,4 +90,18 @@ export function loadConfig(): Config {
 export function getSessionPath(config: Config, accountName: string): string {
   const safeName = accountName.toLowerCase().replace(/[^a-z0-9]/g, '-');
   return path.join(config.dataDir, `session-${safeName}.json`);
+}
+
+/**
+ * Get all allowed Telegram user IDs (derived from account chat IDs)
+ */
+export function getAllowedUserIds(config: Config): string[] {
+  return config.accounts.map(a => a.telegramChatId);
+}
+
+/**
+ * Get all chat IDs for broadcasting messages to all users
+ */
+export function getAllChatIds(config: Config): string[] {
+  return [...new Set(config.accounts.map(a => a.telegramChatId))];
 }

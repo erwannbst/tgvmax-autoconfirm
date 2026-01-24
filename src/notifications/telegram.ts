@@ -17,6 +17,7 @@ export interface Reservation {
 
 export interface AccountResult {
   accountName: string;
+  chatId: string;
   confirmed: number;
   failed: number;
   skipped: number;
@@ -24,38 +25,45 @@ export interface AccountResult {
 
 export class TelegramNotifier {
   private bot: TelegramBot;
-  private chatId: string;
 
   /**
    * Create a TelegramNotifier
-   * @param config Telegram configuration
-   * @param existingBot Optional existing bot instance to reuse (for sharing with command bot)
+   * @param botToken Telegram bot token
+   * @param existingBot Optional existing bot instance to reuse
    */
-  constructor(config: Pick<Config['telegram'], 'botToken' | 'chatId'>, existingBot?: TelegramBot) {
-    this.bot = existingBot ?? new TelegramBot(config.botToken);
-    this.chatId = config.chatId;
+  constructor(botToken: string, existingBot?: TelegramBot) {
+    this.bot = existingBot ?? new TelegramBot(botToken);
   }
 
-  async sendMessage(message: string): Promise<void> {
+  /**
+   * Send a message to a specific chat
+   */
+  async sendMessage(chatId: string, message: string): Promise<void> {
     try {
-      await this.bot.sendMessage(this.chatId, message, { parse_mode: 'HTML' });
-      logger.debug(`Telegram message sent: ${message.substring(0, 50)}...`);
+      await this.bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
+      logger.debug(`Telegram message sent to ${chatId}: ${message.substring(0, 50)}...`);
     } catch (error) {
       logger.error(`Failed to send Telegram message: ${error}`);
     }
   }
 
-  async notifyStartup(): Promise<void> {
-    await this.sendMessage('🚄 <b>TGV Max Auto-Confirm</b> started\n\nChecking for reservations to confirm...');
+  /**
+   * Broadcast a message to multiple chats
+   */
+  async broadcast(chatIds: string[], message: string): Promise<void> {
+    const uniqueChatIds = [...new Set(chatIds)];
+    for (const chatId of uniqueChatIds) {
+      await this.sendMessage(chatId, message);
+    }
   }
 
-  async notifyAccountStart(accountName: string): Promise<void> {
-    await this.sendMessage(`\n👤 <b>[${accountName}]</b>`);
+  async notifyStartup(chatId: string): Promise<void> {
+    await this.sendMessage(chatId, '🚄 <b>TGV Max Auto-Confirm</b> started\n\nChecking reservations...');
   }
 
-  async notifyReservationsFound(accountName: string, reservations: Reservation[]): Promise<void> {
+  async notifyReservationsFound(chatId: string, accountName: string, reservations: Reservation[]): Promise<void> {
     if (reservations.length === 0) {
-      await this.sendMessage(`👤 <b>[${accountName}]</b> No reservations found.`);
+      await this.sendMessage(chatId, `No reservations found.`);
       return;
     }
 
@@ -73,7 +81,7 @@ export class TelegramNotifier {
     const confirmableCount = reservations.filter(r => r.confirmable).length;
     const notYetCount = reservations.length - confirmableCount;
 
-    let header = `👤 <b>[${accountName}]</b> Found ${reservations.length} reservation(s)`;
+    let header = `🔍 Found ${reservations.length} reservation(s)`;
     if (notYetCount > 0 && confirmableCount > 0) {
       header += ` (${confirmableCount} ready, ${notYetCount} not yet)`;
     } else if (notYetCount > 0) {
@@ -81,69 +89,68 @@ export class TelegramNotifier {
     }
 
     const message = `${header}\n\n${lines.join('\n\n')}`;
-    await this.sendMessage(message);
+    await this.sendMessage(chatId, message);
   }
 
-  async notifyConfirmationSuccess(accountName: string, reservation: Reservation): Promise<void> {
+  async notifyConfirmationSuccess(chatId: string, reservation: Reservation): Promise<void> {
     const date = reservation.departureDate.toLocaleDateString('fr-FR', {
       weekday: 'short',
       day: 'numeric',
       month: 'short'
     });
 
-    const message = `✅ <b>[${accountName}]</b> Confirmed!\n` +
+    const message = `✅ <b>Confirmed!</b>\n` +
       `🚄 ${reservation.origin} → ${reservation.destination}\n` +
       `📅 ${date} at ${reservation.departureTime}`;
 
-    await this.sendMessage(message);
+    await this.sendMessage(chatId, message);
   }
 
-  async notifyConfirmationFailure(accountName: string, reservation: Reservation, error: string): Promise<void> {
+  async notifyConfirmationFailure(chatId: string, reservation: Reservation, error: string): Promise<void> {
     const date = reservation.departureDate.toLocaleDateString('fr-FR', {
       weekday: 'short',
       day: 'numeric',
       month: 'short'
     });
 
-    const message = `❌ <b>[${accountName}]</b> Failed!\n` +
+    const message = `❌ <b>Failed!</b>\n` +
       `🚄 ${reservation.origin} → ${reservation.destination}\n` +
       `📅 ${date} at ${reservation.departureTime}\n` +
       `⚠️ ${error}`;
 
-    await this.sendMessage(message);
+    await this.sendMessage(chatId, message);
   }
 
-  async notifyAuthRequired(accountName: string): Promise<void> {
-    await this.sendMessage(
-      `🔐 <b>[${accountName}]</b> Authentication required\n` +
+  async notifyAuthRequired(chatId: string): Promise<void> {
+    await this.sendMessage(chatId,
+      `🔐 <b>Authentication required</b>\n` +
       `Waiting for 2FA code...`
     );
   }
 
-  async notifyAuthSuccess(accountName: string): Promise<void> {
-    await this.sendMessage(`✅ <b>[${accountName}]</b> Authenticated successfully`);
+  async notifyAuthSuccess(chatId: string): Promise<void> {
+    await this.sendMessage(chatId, `✅ Authenticated successfully`);
   }
 
-  async notifyAuthFailure(accountName: string, error: string): Promise<void> {
-    await this.sendMessage(
-      `❌ <b>[${accountName}]</b> Authentication failed!\n` +
+  async notifyAuthFailure(chatId: string, error: string): Promise<void> {
+    await this.sendMessage(chatId,
+      `❌ <b>Authentication failed!</b>\n` +
       `Error: ${error}`
     );
   }
 
-  async notifyError(error: string, accountName?: string): Promise<void> {
-    const prefix = accountName ? `<b>[${accountName}]</b> ` : '';
-    await this.sendMessage(`🚨 ${prefix}Error: ${error}`);
+  async notifyError(chatId: string, error: string): Promise<void> {
+    await this.sendMessage(chatId, `🚨 Error: ${error}`);
   }
 
-  async sendScreenshot(screenshotPath: string, caption?: string): Promise<void> {
+  async sendScreenshot(chatId: string, screenshotPath: string, caption?: string): Promise<void> {
     try {
       if (!fs.existsSync(screenshotPath)) {
         logger.warn(`Screenshot file not found: ${screenshotPath}`);
         return;
       }
 
-      await this.bot.sendPhoto(this.chatId, screenshotPath, {
+      await this.bot.sendPhoto(chatId, screenshotPath, {
         caption: caption || '📸 Error screenshot'
       });
       logger.info(`Screenshot sent via Telegram: ${screenshotPath}`);
@@ -152,28 +159,18 @@ export class TelegramNotifier {
     }
   }
 
-  async notifyAllComplete(results: AccountResult[]): Promise<void> {
-    const totalConfirmed = results.reduce((sum, r) => sum + r.confirmed, 0);
-    const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);
-    const totalSkipped = results.reduce((sum, r) => sum + r.skipped, 0);
+  async notifyAccountComplete(chatId: string, result: AccountResult): Promise<void> {
+    const parts = [];
+    if (result.confirmed > 0) parts.push(`✅ ${result.confirmed} confirmed`);
+    if (result.failed > 0) parts.push(`❌ ${result.failed} failed`);
+    if (result.skipped > 0) parts.push(`⏳ ${result.skipped} not yet available`);
 
-    const emoji = totalFailed === 0 ? '✅' : '⚠️';
-
-    const accountLines = results.map(r => {
-      const parts = [];
-      if (r.confirmed > 0) parts.push(`✅ ${r.confirmed}`);
-      if (r.failed > 0) parts.push(`❌ ${r.failed}`);
-      if (r.skipped > 0) parts.push(`⏳ ${r.skipped}`);
-      const summary = parts.length > 0 ? parts.join(' ') : 'No reservations';
-      return `• <b>${r.accountName}</b>: ${summary}`;
-    });
-
-    let message = `${emoji} <b>Run complete</b>\n\n${accountLines.join('\n')}`;
-
-    if (results.length > 1) {
-      message += `\n\n<b>Total:</b> ✅ ${totalConfirmed} | ❌ ${totalFailed} | ⏳ ${totalSkipped}`;
+    if (parts.length === 0) {
+      return; // No summary needed if nothing happened
     }
 
-    await this.sendMessage(message);
+    const emoji = result.failed === 0 ? '✅' : '⚠️';
+    const message = `${emoji} <b>Done!</b> ${parts.join(', ')}`;
+    await this.sendMessage(chatId, message);
   }
 }

@@ -1,6 +1,6 @@
 import { Page } from 'playwright';
 import { logger } from '../utils/logger';
-import { Reservation, TelegramNotifier } from '../notifications/telegram';
+import { Reservation } from '../notifications/telegram';
 import { randomSleep } from '../utils/helpers';
 import fs from 'fs/promises';
 import path from 'path';
@@ -9,11 +9,9 @@ const MAX_ESPACE_URL = 'https://www.maxjeune-tgvinoui.sncf/sncf-connect/mes-voya
 
 export class ReservationScraper {
   private page: Page;
-  private telegram?: TelegramNotifier;
 
-  constructor(page: Page, telegram?: TelegramNotifier) {
+  constructor(page: Page) {
     this.page = page;
-    this.telegram = telegram;
   }
 
   async navigateToReservations(): Promise<void> {
@@ -177,10 +175,8 @@ export class ReservationScraper {
 
       logger.info(`Found ${confirmButtons.length} Confirmer buttons on page`);
 
-      // Send screenshot as proof
-      if (this.telegram) {
-        await this.sendProofScreenshot('reservations_page');
-      }
+      // Save screenshot for debugging
+      await this.saveDebugScreenshot('reservations_page');
 
       for (let i = 0; i < confirmButtons.length; i++) {
         try {
@@ -299,8 +295,8 @@ export class ReservationScraper {
         }
       }
 
-      if (confirmButtons.length === 0 && this.telegram) {
-        await this.sendProofScreenshot('no_confirm_buttons');
+      if (confirmButtons.length === 0) {
+        await this.saveDebugScreenshot('no_confirm_buttons');
       }
     } catch (error) {
       logger.error(`Error parsing page for reservations: ${error}`);
@@ -397,9 +393,7 @@ export class ReservationScraper {
     return null;
   }
 
-  private async sendProofScreenshot(prefix: string): Promise<void> {
-    if (!this.telegram) return;
-
+  private async saveDebugScreenshot(prefix: string): Promise<void> {
     try {
       const screenshotDir = path.join(process.cwd(), 'data', 'screenshots');
       await fs.mkdir(screenshotDir, { recursive: true });
@@ -408,11 +402,9 @@ export class ReservationScraper {
       const screenshotPath = path.join(screenshotDir, `${prefix}_${timestamp}.png`);
 
       await this.page.screenshot({ path: screenshotPath, fullPage: true });
-      logger.info(`Proof screenshot saved: ${screenshotPath}`);
-
-      await this.telegram.sendScreenshot(screenshotPath, `📸 Page state: ${prefix}`);
+      logger.info(`Debug screenshot saved: ${screenshotPath}`);
     } catch (error) {
-      logger.error(`Failed to send proof screenshot: ${error}`);
+      logger.error(`Failed to save debug screenshot: ${error}`);
     }
   }
 }
