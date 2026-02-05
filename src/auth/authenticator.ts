@@ -147,7 +147,12 @@ export class Authenticator {
       }
 
       // Fill in credentials
-      await this.fillCredentials(page);
+      const alreadyLoggedIn = await this.fillCredentials(page);
+      if (alreadyLoggedIn) {
+        await this.saveCurrentSession();
+        await this.telegram.notifyAuthSuccess(this.account.telegramChatId);
+        return true;
+      }
 
       // Handle 2FA
       const twoFaRequired = await this.check2FARequired(page);
@@ -279,11 +284,21 @@ export class Authenticator {
     throw new Error('Could not find login button');
   }
 
-  private async fillCredentials(page: Page): Promise<void> {
+  private async fillCredentials(page: Page): Promise<boolean> {
     logger.info('Filling in credentials...');
 
-    // Wait for login form
-    await page.waitForSelector('input[type="email"], input[name="email"], input[id="email"]', { timeout: 10000 });
+    // Wait for login form, but check if we got redirected to logged-in state
+    try {
+      await page.waitForSelector('input[type="email"], input[name="email"], input[id="email"]', { timeout: 10000 });
+    } catch {
+      // Email field not found - check if we're actually logged in (session was restored)
+      const isLoggedIn = await this.checkIfLoggedIn(page);
+      if (isLoggedIn) {
+        logger.info('Session was restored during login flow, already logged in');
+        return true;
+      }
+      throw new Error('Could not find email field and not logged in');
+    }
     await randomSleep(500, 1000);
 
     // Find and fill email field
@@ -366,6 +381,7 @@ export class Authenticator {
     }
 
     await page.waitForLoadState('networkidle');
+    return false; // Not already logged in, credentials were filled
   }
 
   private async check2FARequired(page: Page): Promise<boolean> {
