@@ -199,8 +199,6 @@ Bot Mode:
 
 Environment variables:
   SNCF_ACCOUNTS       JSON array with name, email, password, telegramChatId, webhookUrl, webhookSecret
-  WEBHOOK_URL         Google Apps Script webhook URL
-  WEBHOOK_SECRET      Webhook secret key
   TELEGRAM_BOT_TOKEN  Telegram bot token
   SCHEDULE_ENABLED    Enable daily scheduler (default: true)
   SCHEDULE_TIME       Daily run time in HH:MM (default: 08:00)

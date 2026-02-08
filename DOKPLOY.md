@@ -28,8 +28,6 @@
 ```env
 SNCF_EMAIL=your.email@gmail.com
 SNCF_PASSWORD=your_sncf_password
-WEBHOOK_URL=https://script.google.com/macros/s/.../exec
-WEBHOOK_SECRET=your_secret_from_above
 TELEGRAM_BOT_TOKEN=123456789:ABC...
 TELEGRAM_CHAT_ID=123456789
 HEADLESS=true
